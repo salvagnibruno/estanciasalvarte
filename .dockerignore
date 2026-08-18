@@ -1,0 +1,8 @@
+.git
+.claude
+node_modules
+server/node_modules
+server/.env
+server/server.log
+server/db/estancia.db-shm
+server/db/estancia.db-wal

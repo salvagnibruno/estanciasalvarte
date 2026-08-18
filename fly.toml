@@ -1,0 +1,26 @@
+app = "estancia-salvarte"
+primary_region = "gru"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  # Fica fora do repositório: o volume persistente monta em /data e o banco
+  # vive lá (server/db/db.js copia o estancia.db do repo para cá na primeira
+  # subida, se o arquivo ainda não existir).
+  DB_PATH = "/data/estancia.db"
+
+[[mounts]]
+  source = "estancia_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
