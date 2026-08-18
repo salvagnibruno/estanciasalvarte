@@ -1,0 +1,14 @@
+node_modules/
+
+# Segredos reais (use server/.env.example como modelo)
+.env
+
+# Banco de dados local (contém pedidos, clientes, etc. reais do ambiente onde
+# roda). Ao publicar em um novo servidor, copie server/db/estancia.db na mão
+# para lá — não perde nada do catálogo/preços, que também são recriados pelo
+# seed automaticamente numa base vazia. Ver server/README.md.
+server/db/estancia.db
+server/db/estancia.db-shm
+server/db/estancia.db-wal
+
+server/server.log

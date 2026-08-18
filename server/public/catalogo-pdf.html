@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catálogo Comercial — Estância Salvarte</title>
+<link rel="icon" href="/img/favicon.png">
+<style>
+/* ====================================================================
+   Catalogo comercial em formato A4, pronto para "Salvar como PDF".
+   Layout proprio (nao usa style.css do site) para nao herdar nada da
+   navegacao e sair identico na tela e no papel.
+   ==================================================================== */
+:root {
+  --couro-escuro: #3a2416;
+  --couro: #5a3826;
+  --verde: #2f5233;
+  --verde-escuro: #223c26;
+  --dourado: #c99a3e;
+  --dourado-claro: #e5c274;
+  --creme: #f7f0e1;
+  --creme-escuro: #ece0c6;
+  --texto: #2b1c12;
+  --texto-suave: #6b5a48;
+  --vermelho: #a6332f;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', Verdana, Arial, sans-serif;
+  background: #6f6257;
+  color: var(--texto);
+  line-height: 1.45;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+h1, h2, h3, h4 { font-family: Georgia, 'Times New Roman', serif; margin: 0; }
+
+/* ---------- Barra de acoes (some na impressao) ---------- */
+.barra {
+  position: sticky; top: 0; z-index: 10;
+  background: var(--couro-escuro); color: var(--creme);
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  padding: .75rem 1.25rem;
+  border-bottom: 3px solid var(--dourado);
+}
+.barra strong { font-family: Georgia, serif; letter-spacing: .5px; }
+.barra .info { font-size: .85rem; color: var(--creme-escuro); flex: 1; }
+.barra button, .barra a.botao {
+  background: var(--dourado); color: var(--texto); border: none; cursor: pointer;
+  padding: .5rem 1.1rem; border-radius: 20px; font-weight: 700; font-size: .85rem;
+  font-family: inherit; text-decoration: none;
+}
+.barra a.voltar { background: transparent; border: 1.5px solid var(--creme); color: var(--creme); }
+.barra button:hover, .barra a.botao:hover { filter: brightness(1.08); }
+
+/* ---------- Folha A4 ----------
+   Altura travada (e nao `min-height`) para a tela mostrar exatamente a folha que
+   sai na impressao: com altura livre o navegador deixava a folha crescer alem dos
+   297mm e a conferencia na tela nao batia com o PDF. */
+.pagina {
+  width: 210mm; height: 297mm;
+  margin: 10mm auto; background: #fff;
+  position: relative; overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0,0,0,.35);
+  display: flex; flex-direction: column;
+}
+
+/* ---------- Capa ---------- */
+.capa {
+  background: linear-gradient(150deg, var(--verde-escuro) 0%, var(--couro-escuro) 55%, #241408 100%);
+  color: var(--creme);
+  align-items: center; justify-content: center; text-align: center;
+  padding: 24mm 18mm;
+}
+.capa .marca { width: 62mm; margin: 0 auto 8mm; flex: 0 0 auto; }
+/* Vale para a capa e para a pagina de fechamento: a logomarca e' um arquivo de
+   imagem (nao mais um SVG que se ajustava sozinho), entao precisa ser presa a
+   largura do container — sem isto ela sai no tamanho original e estoura a folha.
+   O canto arredondado faz a placa clara da logo parecer proposital sobre o
+   fundo escuro dessas duas paginas.
+   `aspect-ratio` + `object-fit` no lugar de `height: auto`: dentro de um flex
+   em coluna a altura automatica pode ser espremida a zero quando a folha lota,
+   e a logo some do papel. Com a proporcao declarada, o espaco dela e' reservado
+   antes mesmo de a imagem existir. A moldura dourada substitui o box-shadow,
+   que o Chrome descarta quando "Gráficos de fundo" esta desligado na impressao. */
+.capa .marca img, .fechamento .marca img {
+  width: 100%; height: auto; display: block;
+  aspect-ratio: 760 / 702; object-fit: contain;
+  background: var(--creme);
+  border: .4mm solid var(--dourado); border-radius: 2mm;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.capa h1 { font-size: 30pt; letter-spacing: 2px; color: #fff; }
+.capa .fio { width: 46mm; height: 3px; background: var(--dourado); margin: 6mm auto; }
+.capa .assinatura { font-family: Georgia, serif; font-style: italic; font-size: 14pt; color: var(--dourado-claro); }
+.capa .escopo {
+  margin-top: 12mm; border: 1.5px solid var(--dourado);
+  padding: 4mm 8mm; border-radius: 3mm; display: inline-block;
+}
+.capa .escopo small { display: block; font-size: 8pt; letter-spacing: 2px; text-transform: uppercase; color: var(--dourado-claro); }
+.capa .escopo strong { font-family: Georgia, serif; font-size: 16pt; font-weight: 400; }
+.capa .descricao { max-width: 130mm; margin: 8mm auto 0; font-size: 10.5pt; color: var(--creme-escuro); }
+.capa .rodape-capa {
+  margin-top: auto; padding-top: 14mm; width: 100%;
+  display: flex; justify-content: center; gap: 8mm; flex-wrap: wrap;
+  font-size: 9.5pt; color: var(--creme-escuro);
+}
+.capa .rodape-capa span { white-space: nowrap; }
+.capa .data { margin-top: 6mm; font-size: 8.5pt; color: #b6a894; }
+
+/* ---------- Paginas de produtos ---------- */
+.folha { padding: 12mm 13mm 10mm; }
+.cabecalho-folha {
+  display: flex; align-items: center; gap: 4mm; flex: 0 0 auto;
+  border-bottom: 2px solid var(--dourado); padding-bottom: 3mm; margin-bottom: 6mm;
+}
+.cabecalho-folha img {
+  width: 11mm; height: auto; flex: 0 0 auto;
+  aspect-ratio: 760 / 702; object-fit: contain;
+  border-radius: 1mm;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.cabecalho-folha .titulo { flex: 1; }
+.cabecalho-folha .titulo h2 { font-size: 15pt; color: var(--couro-escuro); }
+.cabecalho-folha .titulo small { font-size: 8pt; letter-spacing: 1.5px; text-transform: uppercase; color: var(--verde); font-weight: 700; }
+.cabecalho-folha .marca-texto { font-family: Georgia, serif; font-size: 9pt; color: var(--texto-suave); text-align: right; }
+
+/* A grade ocupa exatamente a sobra da folha (entre cabecalho e rodape) e divide
+   esse espaco em linhas iguais. Sao 2x2 = 4 fichas por folha (POR_PAGINA no
+   script): com 3 linhas a sobra por ficha nao dava para a foto e o texto.
+   Cada linha tem ~118mm; a ficha e' dimensionada para o pior caso caber nisso
+   (ver .item .foto e .item .conteudo), entao nada precisa ser recortado. */
+.grade {
+  display: grid; grid-template-columns: 1fr 1fr;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 6mm; flex: 1 1 auto; min-height: 0;
+}
+.item {
+  border: 1px solid var(--creme-escuro); border-radius: 3mm; overflow: hidden;
+  display: flex; flex-direction: column; background: #fff;
+  break-inside: avoid; min-height: 0;
+}
+/* A foto tem altura de projeto (50mm), mas pode ceder ate 26mm quando a ficha
+   traz muitas cores ou tamanhos. Assim quem "aperta" e' a foto — que so muda de
+   enquadramento — e nunca o texto, que seria fatiado no meio pelo overflow. */
+.item .foto {
+  height: 50mm; flex: 0 1 auto; min-height: 26mm;
+  background: var(--creme); display: flex; align-items: center; justify-content: center;
+  font-size: 26pt; color: var(--texto-suave); border-bottom: 1px solid var(--creme-escuro);
+}
+/* `contain` e nao `cover`: as fotos de produto sao retrato (900x1200) e a janela
+   da ficha e' deitada — recortando pela borda so aparecia uma faixa do meio da
+   peca. Assim a peca sai inteira, sobre o fundo creme da propria celula. */
+.item .foto img { width: 100%; height: 100%; object-fit: contain; }
+/* `flex: 0 0 auto` aqui e nos filhos e' o que impede o corte: sem isso o flex
+   espreme a caixa de texto (e cada linha dentro dela) quando a folha lota, e o
+   titulo/preco saem partidos ao meio no PDF — visivel so na impressao, porque
+   na tela a folha ainda pode crescer alem dos 297mm. */
+.item .conteudo { padding: 3.5mm 4mm 4mm; display: flex; flex-direction: column; gap: 1.4mm; flex: 0 0 auto; }
+.item .conteudo > * { flex: 0 0 auto; }
+.item .linha-codigo { display: flex; align-items: center; justify-content: space-between; gap: 2mm; }
+.item .codigo { font-size: 7.5pt; letter-spacing: 1px; color: var(--texto-suave); text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item h3 { font-size: 12pt; color: var(--couro-escuro); line-height: 1.2; }
+/* Nome e descricao ficam limitados em linhas: com a linha da grade de altura
+   fixa, um texto longo tomaria o lugar do preco na ficha. O `max-height` casado
+   com o numero de linhas garante que o corte caia entre linhas (com reticencias)
+   e nunca no meio de uma delas. */
+.item h3, .item .descricao {
+  display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;
+}
+.item h3 { -webkit-line-clamp: 3; max-height: 3.6em; }
+/* Tres linhas: e' o que uma descricao de 150 caracteres (o teto aplicado no
+   script) ocupa na largura da ficha, entao ela sai inteira em vez de reticenciada. */
+.item .descricao { font-size: 8.5pt; color: var(--texto-suave); -webkit-line-clamp: 3; max-height: 4.35em; line-height: 1.45; }
+/* Tamanhos e cores saem completos, sem "+N" e sem nome cortado — quem cede
+   espaco para isso e' a foto (ver .item .foto). O script confere ficha a ficha
+   depois de montada e, se alguma nao couber, troca os chips de cor pela lista
+   de nomes, que ocupa menos e continua trazendo todas as cores. */
+.item .variacoes { display: flex; flex-direction: column; gap: 1.2mm; margin-top: .5mm; }
+.item .linha-var { display: flex; align-items: center; gap: 1.5mm; flex-wrap: nowrap; min-width: 0; overflow: hidden; }
+.item .linha-var.cores { flex-wrap: wrap; align-items: flex-start; row-gap: 1.2mm; overflow: visible; }
+.item .linha-var.cores .rotulo { padding-top: .8mm; }
+.item .cores-texto { font-size: 7.5pt; color: var(--texto); line-height: 1.35; min-width: 0; }
+.item .linha-var.tam { align-items: flex-start; }
+.item .linha-var .rotulo {
+  font-size: 6.5pt; letter-spacing: .8px; text-transform: uppercase; color: var(--verde);
+  font-weight: 700; flex: 0 0 auto;
+}
+.item .linha-var.tam .rotulo { padding-top: .5mm; }
+/* A numeracao aparece inteira ("34 · 36 · ... · 64") enquanto couber em duas
+   linhas; o script troca pela faixa resumida quando nao couber, para o corte
+   nunca cair no meio dos numeros. */
+.item .tamanhos {
+  font-size: 7.5pt; color: var(--texto); line-height: 1.35; min-width: 0;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; max-height: 2.7em;
+}
+.item .chip {
+  font-size: 7pt; padding: .8mm 2.2mm; border-radius: 6mm; flex: 0 1 auto; min-width: 0;
+  background: var(--creme); border: 1px solid var(--creme-escuro); color: var(--texto-suave);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.item .chip.cor { display: inline-flex; align-items: center; gap: 1.2mm; flex: 0 0 auto; }
+.item .chip.cor i { width: 2.6mm; height: 2.6mm; border-radius: 50%; border: 1px solid rgba(0,0,0,.25); display: inline-block; flex: 0 0 auto; }
+.item .chip.cor b { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.item .encomenda {
+  font-size: 7pt; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; white-space: nowrap;
+  color: #7a5a12; background: #f6e2b8; border-radius: 6mm; padding: .8mm 2.5mm; flex: 0 0 auto;
+}
+.item .preco-area { margin-top: auto; padding-top: 2.5mm; }
+.item .preco { font-family: Georgia, serif; font-size: 16pt; font-weight: 700; color: var(--verde-escuro); }
+.item .preco-antigo { font-size: 9pt; color: var(--texto-suave); text-decoration: line-through; margin-right: 2mm; }
+.item .selo-oferta {
+  display: inline-block; background: var(--vermelho); color: #fff; font-size: 7pt; font-weight: 700;
+  padding: .8mm 2.5mm; border-radius: 6mm; text-transform: uppercase; letter-spacing: .5px; margin-left: 2mm;
+}
+.item .sob-consulta { font-family: Georgia, serif; font-size: 11pt; color: var(--verde); font-style: italic; }
+.item.destaque { border-color: var(--dourado); border-width: 2px; }
+.item .selo-destaque {
+  position: absolute; margin: 2mm 0 0 2mm;
+  background: var(--dourado); color: var(--texto); font-size: 7pt; font-weight: 700;
+  padding: .8mm 2.5mm; border-radius: 6mm; text-transform: uppercase; letter-spacing: .5px;
+}
+
+.rodape-folha {
+  margin-top: auto; flex: 0 0 auto; padding-top: 5mm; border-top: 1px solid var(--creme-escuro);
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 8pt; color: var(--texto-suave);
+}
+.rodape-folha .contatos { display: flex; gap: 5mm; flex-wrap: wrap; }
+
+/* ---------- Pagina final ---------- */
+.fechamento {
+  background: linear-gradient(150deg, var(--couro-escuro) 0%, var(--verde-escuro) 100%);
+  color: var(--creme); text-align: center; align-items: center; justify-content: center;
+  padding: 26mm 20mm;
+}
+.fechamento .marca { width: 44mm; margin: 0 auto 8mm; }
+.fechamento h2 { font-size: 24pt; color: #fff; }
+.fechamento .fio { width: 40mm; height: 3px; background: var(--dourado); margin: 6mm auto; }
+.fechamento p { font-size: 11pt; color: var(--creme-escuro); max-width: 130mm; margin: 0 auto; }
+.fechamento .canais { margin-top: 12mm; display: grid; gap: 4mm; width: 100%; max-width: 110mm; }
+.fechamento .canal {
+  border: 1px solid rgba(233,223,201,.35); border-radius: 3mm; padding: 4mm 6mm;
+  display: flex; align-items: center; gap: 4mm; text-align: left;
+}
+.fechamento .canal .rotulo { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 1.5px; color: var(--dourado-claro); }
+.fechamento .canal .valor { font-family: Georgia, serif; font-size: 13pt; color: #fff; }
+.fechamento .chamada {
+  margin-top: 12mm; background: var(--dourado); color: var(--texto);
+  font-family: Georgia, serif; font-size: 13pt; font-weight: 700;
+  padding: 4mm 10mm; border-radius: 20mm;
+}
+.fechamento .validade { margin-top: 8mm; font-size: 8.5pt; color: #b6a894; }
+
+/* ---------- Impressao ---------- */
+@page { size: A4; margin: 0; }
+@media print {
+  body { background: #fff; }
+  .barra { display: none !important; }
+  .pagina {
+    margin: 0; box-shadow: none; width: 210mm; height: 297mm;
+    page-break-after: always; break-after: page;
+  }
+  .pagina:last-child { page-break-after: auto; break-after: auto; }
+}
+</style>
+</head>
+<body>
+
+<div class="barra">
+  <strong>Catálogo comercial</strong>
+  <span class="info" id="barra-info">Preparando o documento...</span>
+  <a class="botao voltar" href="/admin/index.html">← Voltar ao painel</a>
+  <button id="btn-imprimir">🖨️ Salvar como PDF</button>
+</div>
+
+<div id="documento"></div>
+
+<script src="/js/api.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+// `categorias` aceita uma, varias (separadas por virgula) ou nenhuma (= todas).
+// `categoria`, no singular, continua funcionando para links ja salvos.
+const CATEGORIAS = params.get('categorias') || params.get('categoria') || '';
+// Recorte por publico: 'masculino' ou 'feminino'; `unissex=0` deixa de fora as
+// pecas que servem aos dois.
+const PUBLICO = params.get('publico') || '';
+const INCLUIR_UNISSEX = params.get('unissex') !== '0';
+const INCLUIR_PRECOS = params.get('precos') !== '0';
+const POR_PAGINA = 4; // 2 colunas x 2 linhas por folha A4 (ver .grade no CSS)
+
+const EMOJI_CATEGORIA = {
+  'bombachas-femininas': '👖', 'bombachas-masculinas': '🤠', 'calcas-cargo': '🧥', 'saias': '👗', 'linha-infantil': '🧒',
+  'linha-verao': '👕', 'linha-inverno': '🧣', 'linha-uniformes': '👔', 'alpargatas': '🥿',
+  'botas': '🥾', 'erva-mate-bebidas': '🧉', 'servicos': '🧵'
+};
+
+// Endereco da logomarca usado nas folhas. O servidor manda a arte ja embutida
+// em data URI (`logo_embutida`) justamente para o PDF nunca sair sem ela; a URL
+// normal fica so como reserva se a leitura do arquivo falhar no servidor.
+function enderecoLogo(loja) {
+  return loja.logo_embutida || loja.logo;
+}
+
+function pedacos(lista, tamanho) {
+  const blocos = [];
+  for (let i = 0; i < lista.length; i += tamanho) blocos.push(lista.slice(i, i + tamanho));
+  return blocos;
+}
+
+function dataPorExtenso(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+function blocoPreco(produto) {
+  if (!INCLUIR_PRECOS) {
+    return '<div class="preco-area"><span class="sob-consulta">Valor sob consulta</span></div>';
+  }
+  if (produto.preco_promocional) {
+    return `
+      <div class="preco-area">
+        <span class="preco-antigo">${formatarMoeda(produto.preco_venda)}</span>
+        <span class="selo-oferta">Oferta</span>
+        <div class="preco">${formatarMoeda(produto.preco_promocional)}</div>
+      </div>`;
+  }
+  return `<div class="preco-area"><div class="preco">${formatarMoeda(produto.preco_venda)}</div></div>`;
+}
+
+// A lista de tamanhos vem do banco na ordem de cadastro, que ja e' a ordem da
+// grade. Ela e' impressa inteira; so vira faixa se nao couber (ver ajustarFichas).
+
+// Faixa resumida usada quando a lista completa nao cabe na ficha. Guarda o passo
+// da grade ("34 ao 64 (de 2 em 2)") para nao dar a entender que existe 35.
+function faixaTamanhos(tamanhos) {
+  const primeiro = tamanhos[0];
+  const ultimo = tamanhos[tamanhos.length - 1];
+  const numeros = tamanhos.map(Number);
+  const numerica = tamanhos.every(t => /^\d+$/.test(String(t)));
+  if (numerica && tamanhos.length > 2) {
+    const passo = numeros[1] - numeros[0];
+    const uniforme = numeros.every((n, i) => i === 0 || n - numeros[i - 1] === passo);
+    if (uniforme && passo > 1) return `${primeiro} ao ${ultimo} (de ${passo} em ${passo})`;
+  }
+  return `${primeiro} ao ${ultimo}`;
+}
+
+// ---- Ajuste final das fichas ----
+// Nenhuma informacao e' descartada aqui: o que muda e' a FORMA de apresentar,
+// da mais visual para a mais compacta, e so na ficha que precisar.
+function fichaTransbordou(ficha) {
+  return ficha.scrollHeight > ficha.clientHeight + 1;
+}
+
+// Chips coloridos -> lista de nomes separados por virgula. As mesmas cores,
+// em cerca de um terco do espaco.
+function compactarCores(ficha) {
+  const linha = ficha.querySelector('.linha-var.cores');
+  if (!linha || !linha.dataset.cores) return;
+  linha.innerHTML = `<span class="rotulo">Cores</span><span class="cores-texto">${escapeHtml(linha.dataset.cores)}</span>`;
+  linha.classList.remove('cores');
+  linha.classList.add('cores-compacta');
+}
+
+// Numeracao item a item -> faixa com o passo da grade ("34 ao 64 (de 2 em 2)"),
+// que descreve a mesma grade de tamanhos em uma linha.
+function compactarTamanhos(ficha) {
+  const campo = ficha.querySelector('.tamanhos');
+  if (!campo || !campo.dataset.tamanhos) return;
+  const lista = JSON.parse(campo.dataset.tamanhos);
+  if (lista.length) campo.textContent = faixaTamanhos(lista);
+}
+
+function ajustarFichas() {
+  document.querySelectorAll('.item').forEach(ficha => {
+    // A numeracao nunca pode sair reticenciada pelo limite de linhas.
+    const campo = ficha.querySelector('.tamanhos');
+    if (campo && campo.scrollHeight > campo.clientHeight + 1) compactarTamanhos(ficha);
+    if (fichaTransbordou(ficha)) compactarCores(ficha);
+    if (fichaTransbordou(ficha)) compactarTamanhos(ficha);
+  });
+}
+
+// Todas as cores, com a amostra da cor ao lado do nome. Nenhuma fica de fora:
+// se a ficha nao comportar os chips, o ajuste final troca por lista de nomes.
+function linhaCores(cores) {
+  if (!cores.length) return '';
+  const chips = cores
+    .map(c => `<span class="chip cor"><i style="background:${escapeHtml(c.cor_hex)}"></i><b>${escapeHtml(c.cor_nome)}</b></span>`)
+    .join('');
+  const nomes = cores.map(c => c.cor_nome).join(', ');
+  return `<div class="linha-var cores" data-cores="${escapeHtml(nomes)}"><span class="rotulo">Cores</span>${chips}</div>`;
+}
+
+function cardProduto(produto, slugCategoria) {
+  const emoji = EMOJI_CATEGORIA[slugCategoria] || '🛍️';
+  const foto = produto.imagem_url
+    ? `<img src="${escapeHtml(produto.imagem_url)}" alt="${escapeHtml(produto.nome)}">`
+    : emoji;
+
+  const linhaTamanhos = produto.tamanhos.length
+    ? `<div class="linha-var tam"><span class="rotulo">Tam.</span>
+         <span class="tamanhos" data-tamanhos="${escapeHtml(JSON.stringify(produto.tamanhos))}">${escapeHtml(produto.tamanhos.join(' · '))}</span>
+       </div>`
+    : '';
+  const cores = linhaCores(produto.cores);
+
+  const descricao = (produto.descricao || '').trim();
+  const descricaoCurta = descricao.length > 150 ? descricao.slice(0, 150).trimEnd() + '…' : descricao;
+  const codigo = produto.codigo ? `<span class="codigo">Ref. ${escapeHtml(produto.codigo)}</span>` : '<span class="codigo"></span>';
+
+  return `
+    <article class="item ${produto.destaque ? 'destaque' : ''}">
+      ${produto.destaque ? '<span class="selo-destaque">Destaque</span>' : ''}
+      <div class="foto">${foto}</div>
+      <div class="conteudo">
+        <div class="linha-codigo">
+          ${codigo}
+          ${produto.sob_encomenda ? '<span class="encomenda">Sob encomenda</span>' : ''}
+        </div>
+        <h3>${escapeHtml(produto.nome)}</h3>
+        ${descricaoCurta ? `<p class="descricao">${escapeHtml(descricaoCurta)}</p>` : ''}
+        ${(linhaTamanhos || cores) ? `<div class="variacoes">${linhaTamanhos}${cores}</div>` : ''}
+        ${blocoPreco(produto)}
+      </div>
+    </article>`;
+}
+
+function paginaCapa(dados) {
+  const loja = dados.loja;
+  const contatos = [
+    loja.telefone ? `📞 ${escapeHtml(loja.telefone)}` : '',
+    loja.whatsappLabel ? `💬 WhatsApp ${escapeHtml(loja.whatsappLabel)}` : '',
+    loja.instagramLabel ? `📷 ${escapeHtml(loja.instagramLabel)}` : '',
+    loja.email ? `✉️ ${escapeHtml(loja.email)}` : ''
+  ].filter(Boolean).map(c => `<span>${c}</span>`).join('');
+
+  return `
+    <section class="pagina capa">
+      <div class="marca"><img src="${escapeHtml(enderecoLogo(loja))}" alt="${escapeHtml(loja.nome)}"></div>
+      <h1>CATÁLOGO</h1>
+      <div class="fio"></div>
+      <p class="assinatura">${escapeHtml(loja.assinatura)}</p>
+      <div class="escopo">
+        <small>Seleção</small>
+        <strong>${escapeHtml(dados.escopo)}</strong>
+      </div>
+      <p class="descricao">${escapeHtml(loja.descricao)}</p>
+      <div class="rodape-capa">${contatos}</div>
+      <p class="data">${dados.total_produtos} produto(s) · Edição de ${dataPorExtenso(dados.gerado_em)}</p>
+    </section>`;
+}
+
+function paginaProdutos(dados, categoria, produtos, indice, totalFolhas) {
+  const loja = dados.loja;
+  return `
+    <section class="pagina folha">
+      <header class="cabecalho-folha">
+        <img src="${escapeHtml(enderecoLogo(loja))}" alt="">
+        <div class="titulo">
+          <small>${escapeHtml(loja.nome)}</small>
+          <h2>${escapeHtml(categoria.nome)}</h2>
+        </div>
+        <div class="marca-texto">Página ${indice} de ${totalFolhas}</div>
+      </header>
+      <div class="grade">${produtos.map(p => cardProduto(p, categoria.slug)).join('')}</div>
+      <footer class="rodape-folha">
+        <div class="contatos">
+          ${loja.telefone ? `<span>📞 ${escapeHtml(loja.telefone)}</span>` : ''}
+          ${loja.whatsappLabel ? `<span>💬 ${escapeHtml(loja.whatsappLabel)}</span>` : ''}
+          ${loja.instagramLabel ? `<span>📷 ${escapeHtml(loja.instagramLabel)}</span>` : ''}
+        </div>
+        <span>${INCLUIR_PRECOS ? 'Valores sujeitos a alteração sem aviso prévio.' : 'Valores sob consulta.'}</span>
+      </footer>
+    </section>`;
+}
+
+function paginaFechamento(dados) {
+  const loja = dados.loja;
+  const canal = (rotulo, valor) => valor
+    ? `<div class="canal"><div><div class="rotulo">${rotulo}</div><div class="valor">${escapeHtml(valor)}</div></div></div>`
+    : '';
+
+  return `
+    <section class="pagina fechamento">
+      <div class="marca"><img src="${escapeHtml(enderecoLogo(loja))}" alt="${escapeHtml(loja.nome)}"></div>
+      <h2>Vamos fechar seu pedido?</h2>
+      <div class="fio"></div>
+      <p>Peça pelo WhatsApp e receba atendimento direto com a loja. Trabalhamos com pronta-entrega e
+         também sob encomenda, no seu tamanho e na sua cor. Uniformes e pedidos em quantidade têm
+         condição especial — é só chamar.</p>
+      <div class="canais">
+        ${canal('WhatsApp', loja.whatsappLabel)}
+        ${canal('Telefone', loja.telefone)}
+        ${canal('Instagram', loja.instagramLabel)}
+        ${canal('E-mail', loja.email)}
+        ${canal('Loja online', loja.site)}
+        ${canal('Endereço', loja.endereco)}
+      </div>
+      <div class="chamada">Peça agora pelo WhatsApp ${escapeHtml(loja.whatsappLabel || '')}</div>
+      <p class="validade">Catálogo gerado em ${dataPorExtenso(dados.gerado_em)}.
+        ${INCLUIR_PRECOS ? 'Preços válidos enquanto durarem os estoques.' : 'Consulte-nos para orçamento.'}</p>
+    </section>`;
+}
+
+// Confere se o servidor aplicou de fato a selecao pedida. Um servidor iniciado
+// antes desta versao ignora o parametro `categorias` (so entendia `categoria`,
+// no singular) e devolve a loja inteira — o resultado parece "cache do
+// navegador", mas e' o processo do Node com a rota antiga em memoria.
+function conferirSelecao(dados) {
+  if (!CATEGORIAS) return null;
+  const pedidas = CATEGORIAS.split(',').map(s => s.trim()).filter(Boolean);
+  const atendidas = Array.isArray(dados.categorias_pedidas) ? dados.categorias_pedidas : null;
+  const vieram = dados.categorias.length;
+  if (atendidas && atendidas.length === pedidas.length) return null;
+  return `⚠️ O servidor não aplicou o filtro de categorias: pedimos ${pedidas.length} e vieram ${vieram}. `
+    + 'Reinicie o servidor da loja (as rotas foram atualizadas) e gere de novo.';
+}
+
+async function montar() {
+  const consulta = new URLSearchParams();
+  if (CATEGORIAS) consulta.set('categorias', CATEGORIAS);
+  if (PUBLICO) {
+    consulta.set('publico', PUBLICO);
+    if (!INCLUIR_UNISSEX) consulta.set('unissex', '0');
+  }
+  if (!INCLUIR_PRECOS) consulta.set('precos', '0');
+  // Marca de tempo: garante que nem o navegador nem um proxy sirvam a resposta
+  // de uma geracao anterior quando a selecao muda.
+  consulta.set('_', Date.now());
+
+  const dados = await Api.get('/api/catalogo?' + consulta.toString());
+  // Vira o nome sugerido do arquivo ao salvar em PDF.
+  const nomeDocumento = CATEGORIAS ? `Catálogo ${dados.escopo}` : dados.escopo;
+  document.title = `${nomeDocumento} — ${dados.loja.nome}`;
+
+  // Quantas folhas de produto o documento terá (para numerar o rodapé).
+  const folhas = dados.categorias.flatMap(cat =>
+    pedacos(cat.produtos, POR_PAGINA).map(bloco => ({ cat, bloco }))
+  );
+
+  const html = [
+    paginaCapa(dados),
+    ...folhas.map((f, i) => paginaProdutos(dados, f.cat, f.bloco, i + 1, folhas.length)),
+    paginaFechamento(dados)
+  ].join('');
+
+  document.getElementById('documento').innerHTML = html;
+  ajustarFichas();
+  const barra = document.getElementById('barra-info');
+  barra.textContent =
+    `${dados.escopo} · ${dados.total_produtos} produto(s) · ${INCLUIR_PRECOS ? 'com valores' : 'sem valores'} · ${folhas.length + 2} página(s)`;
+
+  const alerta = conferirSelecao(dados);
+  if (alerta) {
+    barra.textContent = alerta;
+    barra.style.color = '#ffd9a0';
+    barra.style.fontWeight = '700';
+    return;
+  }
+
+  if (!dados.total_produtos) {
+    barra.textContent = 'Nenhum produto ativo encontrado para esta seleção.';
+    return;
+  }
+
+  // Quando o painel manda "imprimir=1", abre a janela de impressao sozinho,
+  // mas so depois que as imagens carregarem (senao sai com espacos em branco).
+  if (params.get('imprimir') === '1') {
+    await imagensProntas();
+    window.print();
+  }
+}
+
+// Espera as imagens do documento (com um teto de 8s para nao travar).
+// Usa decode() e nao so o evento load: `load` avisa que o arquivo chegou, mas o
+// Chrome ainda pode nao ter decodificado o bitmap na hora de montar a folha de
+// impressao — e' o bastante para a imagem faltar no PDF. decode() so resolve
+// quando ela ja esta pronta para ser pintada.
+function imagensProntas() {
+  const imagens = [...document.images];
+  if (!imagens.length) return Promise.resolve();
+  const pronta = (img) => (img.decode ? img.decode().catch(() => {}) : Promise.resolve())
+    .then(() => {
+      if (img.complete) return;
+      return new Promise(resolve => {
+        img.addEventListener('load', resolve, { once: true });
+        img.addEventListener('error', resolve, { once: true });
+      });
+    });
+  return Promise.race([
+    Promise.all(imagens.map(pronta)),
+    new Promise(resolve => setTimeout(resolve, 8000))
+  ]);
+}
+
+document.getElementById('btn-imprimir').addEventListener('click', () => window.print());
+
+montar().catch(e => {
+  document.getElementById('barra-info').textContent = 'Erro ao montar o catálogo: ' + e.message;
+});
+</script>
+</body>
+</html>

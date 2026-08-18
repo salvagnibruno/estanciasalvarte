@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel Admin — Estância Salvarte</title>
+<link rel="icon" href="/img/favicon.png">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app-header"></div>
+<div class="painel-shell">
+  <nav class="painel-sidebar">
+    <a href="#" data-secao="produtos" class="ativo">📦 Produtos</a>
+    <a href="#" data-secao="categorias">🗂️ Categorias</a>
+    <a href="#" data-secao="catalogo" data-permissao="exportar_catalogo">📄 Exportar catálogo</a>
+    <a href="#" data-secao="pedidos">🧾 Pedidos</a>
+    <a href="#" data-secao="clientes">👥 Clientes</a>
+    <a href="#" data-secao="csat">⭐ Pesquisa de satisfação</a>
+    <a href="#" data-secao="agendamentos">📅 Agendamentos</a>
+    <a href="#" data-secao="encomendas">🔔 Encomendas / avisos de estoque</a>
+  </nav>
+  <main class="painel-main">
+    <div class="painel-topo">
+      <h2 id="titulo-secao">Produtos</h2>
+    </div>
+    <div id="conteudo-secao"><p class="vazio">Carregando...</p></div>
+  </main>
+</div>
+<div id="app-footer"></div>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script src="/js/admin.js"></script>
+</body>
+</html>

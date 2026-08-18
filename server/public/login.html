@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Entrar — Estância Salvarte</title>
+<link rel="icon" href="/img/favicon.png">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app-header"></div>
+<section class="container mt-2">
+  <div class="form-card" id="bloco-login-registro">
+    <div class="flex entre">
+      <h2 id="titulo-form">Entrar</h2>
+      <a href="#" id="alternar-modo" style="font-size:.85rem;color:var(--verde);font-weight:700;">Criar conta</a>
+    </div>
+    <p style="color:var(--texto-suave);font-size:.85rem;">Login é opcional para comprar, mas permite salvar carrinho, pedidos e interesses.</p>
+
+    <div id="campo-nome" style="display:none;">
+      <label>Nome completo</label><input id="f-nome">
+    </div>
+    <label>E-mail</label><input id="f-email" type="email">
+    <div id="campo-telefone" style="display:none;">
+      <label>Telefone</label><input id="f-telefone">
+    </div>
+    <label>Senha</label><input id="f-senha" type="password">
+
+    <button class="btn mt-2" id="btn-enviar" style="width:100%;">Entrar</button>
+    <p id="msg-login" class="msg" style="display:none;"></p>
+  </div>
+
+  <div class="form-card" id="bloco-confirmar" style="display:none;">
+    <h2>Confirme seu cadastro</h2>
+    <p style="color:var(--texto-suave);font-size:.85rem;">
+      Enviamos um código de confirmação para <strong id="conf-email-mostrado"></strong>. Digite-o abaixo para ativar sua conta.
+    </p>
+    <label>Código de confirmação</label>
+    <input id="f-codigo" inputmode="numeric" maxlength="6" placeholder="000000">
+    <button class="btn mt-2" id="btn-confirmar" style="width:100%;">Confirmar cadastro</button>
+    <p style="margin-top:.6rem;font-size:.85rem;">
+      Não chegou? <a href="#" id="link-reenviar" style="color:var(--verde);font-weight:700;">Reenviar código</a>
+    </p>
+    <p id="msg-confirmar" class="msg" style="display:none;"></p>
+  </div>
+</section>
+<div id="app-footer"></div>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+let modoRegistro = false;
+let emailPendenteConfirmacao = null;
+
+document.getElementById('alternar-modo').addEventListener('click', (e) => {
+  e.preventDefault();
+  modoRegistro = !modoRegistro;
+  document.getElementById('titulo-form').textContent = modoRegistro ? 'Criar conta' : 'Entrar';
+  document.getElementById('alternar-modo').textContent = modoRegistro ? 'Já tenho conta' : 'Criar conta';
+  document.getElementById('campo-nome').style.display = modoRegistro ? 'block' : 'none';
+  document.getElementById('campo-telefone').style.display = modoRegistro ? 'block' : 'none';
+  document.getElementById('btn-enviar').textContent = modoRegistro ? 'Criar conta' : 'Entrar';
+});
+
+function mostrarBlocoConfirmar(email) {
+  emailPendenteConfirmacao = email;
+  document.getElementById('conf-email-mostrado').textContent = email;
+  document.getElementById('bloco-login-registro').style.display = 'none';
+  document.getElementById('bloco-confirmar').style.display = 'block';
+}
+
+document.getElementById('btn-enviar').addEventListener('click', async () => {
+  const msg = document.getElementById('msg-login');
+  msg.style.display = 'none';
+  try {
+    if (modoRegistro) {
+      const resposta = await Api.post('/api/auth/registro', {
+        nome: document.getElementById('f-nome').value,
+        email: document.getElementById('f-email').value,
+        senha: document.getElementById('f-senha').value,
+        telefone: document.getElementById('f-telefone').value
+      });
+      mostrarBlocoConfirmar(resposta.email);
+      return;
+    }
+    await Api.post('/api/auth/login', {
+      email: document.getElementById('f-email').value,
+      senha: document.getElementById('f-senha').value
+    });
+    window.location.href = '/conta/index.html';
+  } catch (e) {
+    // Conta existe mas ainda não confirmou o e-mail: manda direto para a
+    // tela de código em vez de só mostrar um erro sem saída.
+    if (e.status === 403 && e.dados && e.dados.precisa_confirmar) {
+      mostrarBlocoConfirmar(e.dados.email);
+      return;
+    }
+    msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block';
+  }
+});
+
+document.getElementById('btn-confirmar').addEventListener('click', async () => {
+  const msg = document.getElementById('msg-confirmar');
+  msg.style.display = 'block';
+  try {
+    await Api.post('/api/auth/confirmar', {
+      email: emailPendenteConfirmacao,
+      codigo: document.getElementById('f-codigo').value
+    });
+    window.location.href = '/conta/index.html';
+  } catch (e) {
+    msg.textContent = e.message; msg.className = 'msg erro';
+  }
+});
+
+document.getElementById('link-reenviar').addEventListener('click', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('msg-confirmar');
+  msg.style.display = 'block';
+  try {
+    await Api.post('/api/auth/reenviar-codigo', { email: emailPendenteConfirmacao });
+    msg.textContent = 'Código reenviado — confira seu e-mail.'; msg.className = 'msg sucesso';
+  } catch (e2) {
+    msg.textContent = e2.message; msg.className = 'msg erro';
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carrinho — Estância Salvarte</title>
+<link rel="icon" href="/img/favicon.png">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app-header"></div>
+<section class="container mt-2">
+  <h2>Meu carrinho</h2>
+  <div id="lista-carrinho"><p class="vazio">Carregando...</p></div>
+</section>
+<div id="app-footer"></div>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+async function carregar() {
+  const carrinho = await Api.get('/api/carrinho');
+  const area = document.getElementById('lista-carrinho');
+  if (!carrinho.itens.length) {
+    area.innerHTML = '<p class="vazio">Seu carrinho está vazio. <a href="/catalogo.html" style="color:var(--verde);font-weight:700;">Ver catálogo</a></p>';
+    return;
+  }
+  area.innerHTML = `
+    <div class="tabela-wrap">
+      <table>
+        <thead><tr><th>Produto</th><th>Tamanho</th><th>Cor</th><th>Qtd.</th><th>Preço</th><th>Subtotal</th><th></th></tr></thead>
+        <tbody>
+          ${carrinho.itens.map(i => `
+            <tr>
+              <td>${escapeHtml(i.produto_nome)}</td>
+              <td>${escapeHtml(i.tamanho || '-')}</td>
+              <td>${escapeHtml(i.cor || '-')}</td>
+              <td><input type="number" min="1" value="${i.quantidade}" style="width:70px;" data-item="${i.id}" class="input-qtd"></td>
+              <td>${formatarMoeda(i.preco_unitario)}</td>
+              <td>${formatarMoeda(i.preco_unitario * i.quantidade)}</td>
+              <td><button class="btn perigo pequeno" data-remover="${i.id}">Remover</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="flex entre mt-2">
+      <h3>Total: ${formatarMoeda(carrinho.total)}</h3>
+      <a class="btn" href="/checkout.html">Finalizar compra</a>
+    </div>
+  `;
+
+  document.querySelectorAll('.input-qtd').forEach(inp => inp.addEventListener('change', async () => {
+    await Api.put('/api/carrinho/itens/' + inp.dataset.item, { quantidade: parseInt(inp.value, 10) || 1 });
+    carregar(); atualizarContadorCarrinho();
+  }));
+  document.querySelectorAll('[data-remover]').forEach(btn => btn.addEventListener('click', async () => {
+    await Api.del('/api/carrinho/itens/' + btn.dataset.remover);
+    carregar(); atualizarContadorCarrinho();
+  }));
+}
+carregar();
+</script>
+</body>
+</html>

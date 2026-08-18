@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Produto — Estância Salvarte</title>
+<link rel="icon" href="/img/favicon.png">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  .produto-detalhe { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+  @media (max-width: 760px) { .produto-detalhe { grid-template-columns: 1fr; } }
+  /* A foto aparece INTEIRA. As fotos da loja sao retrato (900x1200) e o quadro
+     e' mais largo que alto: recortando pela borda (`cover`) so sobrava uma faixa
+     do meio — na alpargata aparecia a perna da modelo, e nao o calcado. */
+  .produto-imagem { background: #fff; border: 1px solid var(--creme-escuro); border-radius: var(--raio); height: 460px; display: flex; align-items: center; justify-content: center; font-size: 4rem; box-shadow: var(--sombra); padding: .5rem; }
+  .produto-imagem img { width: 100%; height: 100%; object-fit: contain; border-radius: calc(var(--raio) - 4px); }
+  .opcoes-grupo { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0 1rem; }
+  .opcao-btn { padding: .4rem .8rem; border: 1.5px solid #d8cdb6; border-radius: 6px; background: #fff; cursor: pointer; font-size: .85rem; }
+  .opcao-btn.selecionado { border-color: var(--verde); background: var(--verde); color: #fff; }
+  .opcao-cor { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #d8cdb6; cursor: pointer; position: relative; }
+  .opcao-cor.selecionado { border-color: var(--dourado); box-shadow: 0 0 0 2px var(--dourado); }
+  /* Marca a bolinha das cores que tem foto propria: o cliente ve quais delas
+     mudam a imagem ao serem escolhidas. */
+  .opcao-cor.com-foto::after {
+    content: '📷'; position: absolute; right: -4px; bottom: -6px; font-size: .6rem;
+    background: #fff; border-radius: 50%; line-height: 1; padding: 1px;
+  }
+  .legenda-cor { font-size: .85rem; color: var(--texto-suave); margin: -.6rem 0 1rem; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<section class="container mt-2" id="conteudo-produto">
+  <p class="vazio">Carregando produto...</p>
+</section>
+
+<div id="app-footer"></div>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+const id = new URLSearchParams(window.location.search).get('id');
+let produtoAtual = null;
+let tamanhoSel = null;
+let corSel = null;
+
+function statusHtml(p) {
+  // Sob encomenda antes de disponivel: montarProduto() marca essas pecas como
+  // disponiveis (podem ser pedidas), e a ordem inversa dizia "Em estoque".
+  if (p.tipo_estoque === 'sob_encomenda') return '<span class="badge alerta">Sob encomenda</span>';
+  if (p.disponivel) return '<span class="badge ok">Em estoque</span>';
+  return '<span class="badge indisponivel">Esgotado no momento</span>';
+}
+
+async function carregar() {
+  if (!id) { document.getElementById('conteudo-produto').innerHTML = '<p class="vazio">Produto inválido.</p>'; return; }
+  try {
+    produtoAtual = await Api.get('/api/produtos/' + id);
+  } catch (e) {
+    document.getElementById('conteudo-produto').innerHTML = '<p class="vazio">Produto não encontrado.</p>';
+    return;
+  }
+  const p = produtoAtual;
+  document.title = p.nome + ' — Estância Salvarte';
+
+  document.getElementById('conteudo-produto').innerHTML = `
+    <div class="produto-detalhe">
+      <div class="produto-imagem" id="produto-imagem">${p.imagem_url
+        ? `<img id="foto-produto" src="${p.imagem_url}" alt="${escapeHtml(p.nome)}">` : '🛍️'}</div>
+      <div>
+        <span class="cat" style="color:var(--verde);font-weight:700;text-transform:uppercase;font-size:.8rem;">${escapeHtml(p.categoria_nome)}</span>
+        <h1>${escapeHtml(p.nome)}</h1>
+        ${statusHtml(p)}
+        <p style="color:var(--texto-suave);">${escapeHtml(p.descricao || 'Peça confeccionada com qualidade e tradição, ideal para o dia a dia ou uso campeiro.')}</p>
+        <div class="preco" style="font-size:1.8rem;font-weight:700;margin:.6rem 0;">${formatarMoeda(p.preco_venda)}</div>
+
+        ${p.tamanhos.length ? `<label>Tamanho</label><div class="opcoes-grupo" id="opcoes-tamanho">
+          ${p.tamanhos.map(t => `<button type="button" class="opcao-btn" data-tamanho="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('')}
+        </div>` : ''}
+
+        ${p.cores.length ? `<label>Cor</label><div class="opcoes-grupo" id="opcoes-cor">
+          ${p.cores.map((c, i) => `<button type="button" title="${escapeHtml(c.cor_nome)}"
+            class="opcao-cor ${c.imagem_url ? 'com-foto' : ''}" style="background:${c.cor_hex}"
+            data-cor="${escapeHtml(c.cor_nome)}" data-indice="${i}"></button>`).join('')}
+        </div>
+        <p class="legenda-cor" id="legenda-cor"></p>` : ''}
+
+        <label>Quantidade</label>
+        <input type="number" id="input-quantidade" value="1" min="1" style="max-width:100px;">
+
+        <div class="mt-1" id="area-acao"></div>
+        <p id="msg-produto" class="msg" style="display:none;"></p>
+
+        <a href="#" id="link-interesse" class="btn secundario pequeno mt-1" style="border-color:var(--couro);color:var(--couro);display:inline-block;">♡ Salvar como interesse</a>
+      </div>
+    </div>
+  `;
+
+  document.querySelectorAll('#opcoes-tamanho .opcao-btn').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('#opcoes-tamanho .opcao-btn').forEach(b => b.classList.remove('selecionado'));
+    btn.classList.add('selecionado');
+    tamanhoSel = btn.dataset.tamanho;
+  }));
+  document.querySelectorAll('#opcoes-cor .opcao-cor').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('#opcoes-cor .opcao-cor').forEach(b => b.classList.remove('selecionado'));
+    btn.classList.add('selecionado');
+    corSel = btn.dataset.cor;
+    mostrarFotoDaCor(p.cores[Number(btn.dataset.indice)]);
+  }));
+
+  document.getElementById('link-interesse').addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      await Api.post('/api/interesses', { produto_id: p.id });
+      mostrarMsg('Produto salvo nos seus interesses!', 'sucesso');
+    } catch (err) { mostrarMsg(err.message, 'erro'); }
+  });
+
+  montarAreaAcao();
+}
+
+// Troca a foto principal pela foto da cor escolhida. Cor sem foto propria volta
+// para a foto do produto — nunca deixa o cliente sem imagem.
+function mostrarFotoDaCor(cor) {
+  if (!cor) return;
+  // A legenda so aparece quando a foto realmente mudou. Sem foto propria da cor
+  // nao ha' o que explicar: a imagem continua sendo a da peca.
+  const legenda = document.getElementById('legenda-cor');
+  if (legenda) legenda.textContent = cor.imagem_url ? `Você está vendo a peça na cor ${cor.cor_nome}.` : '';
+
+  const nova = cor.imagem_url || produtoAtual.imagem_url;
+  if (!nova) return;
+
+  const area = document.getElementById('produto-imagem');
+  let foto = document.getElementById('foto-produto');
+  if (!foto) {
+    // Produto que nao tinha foto nenhuma (estava com o emoji no lugar).
+    area.innerHTML = `<img id="foto-produto" src="" alt="${escapeHtml(produtoAtual.nome)}">`;
+    foto = document.getElementById('foto-produto');
+  }
+  if (foto.getAttribute('src') === nova) return;
+  foto.src = nova;
+  foto.alt = `${produtoAtual.nome} — ${cor.cor_nome}`;
+}
+
+function mostrarMsg(texto, tipo) {
+  const el = document.getElementById('msg-produto');
+  el.textContent = texto; el.className = 'msg ' + tipo; el.style.display = 'block';
+}
+
+function montarAreaAcao() {
+  const area = document.getElementById('area-acao');
+  const p = produtoAtual;
+  if (p.disponivel) {
+    area.innerHTML = `<button class="btn" id="btn-add-carrinho">Adicionar ao carrinho</button>`;
+    document.getElementById('btn-add-carrinho').addEventListener('click', adicionarAoCarrinho);
+  } else {
+    const rotulo = p.tipo_estoque === 'sob_encomenda' ? 'Encomendar este produto' : 'Avisar quando chegar';
+    area.innerHTML = `<button class="btn" id="btn-encomendar">${rotulo}</button>`;
+    document.getElementById('btn-encomendar').addEventListener('click', () => abrirFormEncomenda(p.tipo_estoque === 'sob_encomenda' ? 'encomenda' : 'aviso_estoque'));
+  }
+}
+
+async function adicionarAoCarrinho() {
+  if (produtoAtual.tamanhos.length && !tamanhoSel) return mostrarMsg('Selecione um tamanho.', 'erro');
+  if (produtoAtual.cores.length && !corSel) return mostrarMsg('Selecione uma cor.', 'erro');
+  const quantidade = parseInt(document.getElementById('input-quantidade').value, 10) || 1;
+  try {
+    await Api.post('/api/carrinho/itens', { produto_id: produtoAtual.id, tamanho: tamanhoSel, cor: corSel, quantidade });
+    mostrarMsg('Adicionado ao carrinho!', 'sucesso');
+    atualizarContadorCarrinho();
+  } catch (e) { mostrarMsg(e.message, 'erro'); }
+}
+
+function abrirFormEncomenda(tipo) {
+  const area = document.getElementById('area-acao');
+  area.innerHTML = `
+    <div class="card" style="padding:1rem;">
+      <h4>${tipo === 'encomenda' ? 'Encomendar produto' : 'Avisar quando chegar'}</h4>
+      <label>Nome</label><input id="enc-nome">
+      <label>Telefone / WhatsApp</label><input id="enc-telefone">
+      <label>E-mail (opcional)</label><input id="enc-email">
+      <button class="btn mt-1" id="enc-enviar">Enviar</button>
+    </div>
+  `;
+  document.getElementById('enc-enviar').addEventListener('click', async () => {
+    try {
+      const resp = await Api.post('/api/encomendas', {
+        produto_id: produtoAtual.id, tipo,
+        nome: document.getElementById('enc-nome').value,
+        telefone: document.getElementById('enc-telefone').value,
+        email: document.getElementById('enc-email').value,
+        tamanho: tamanhoSel, cor: corSel,
+        quantidade: parseInt(document.getElementById('input-quantidade').value, 10) || 1
+      });
+      mostrarMsg(resp.mensagem, 'sucesso');
+    } catch (e) { mostrarMsg(e.message, 'erro'); }
+  });
+}
+
+carregar();
+</script>
+</body>
+</html>

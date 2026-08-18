@@ -1,0 +1,67 @@
+const express = require('express');
+const router = express.Router();
+const db = require('../db/db');
+const { obterCarrinhoAtual, montarRespostaCarrinho } = require('./carrinho');
+
+// Avalia um cupom contra os itens do carrinho (e nao contra um total solto
+// vindo da tela): so' assim da' para restringir o desconto a produtos
+// especificos, e o valor final nao depende do que o cliente mandar.
+// `itens` no formato de carrinho_itens: { produto_id, quantidade, preco_unitario, ... }
+function avaliarCupom(codigoBruto, itens) {
+  const codigo = (codigoBruto || '').trim().toUpperCase();
+  if (!codigo) return { valido: false, codigo: null, desconto: 0, motivo: 'Informe um cupom.' };
+
+  const cupom = db.prepare('SELECT * FROM cupons WHERE UPPER(codigo) = ?').get(codigo);
+  if (!cupom) return { valido: false, codigo, desconto: 0, motivo: 'Cupom não encontrado.' };
+  if (!cupom.ativo) return { valido: false, codigo, desconto: 0, motivo: 'Este cupom não está mais ativo.' };
+
+  const hoje = new Date().toISOString().slice(0, 10);
+  if (cupom.validade_inicio && hoje < cupom.validade_inicio) {
+    return { valido: false, codigo, desconto: 0, motivo: 'Este cupom ainda não é válido.' };
+  }
+  if (cupom.validade && hoje > cupom.validade) {
+    return { valido: false, codigo, desconto: 0, motivo: 'Cupom vencido.' };
+  }
+  if (cupom.limite_usos !== null && cupom.usos_atuais >= cupom.limite_usos) {
+    return { valido: false, codigo, desconto: 0, motivo: 'Este cupom já atingiu o limite de usos.' };
+  }
+
+  // Sem produtos vinculados = vale para o carrinho inteiro. Com produtos
+  // vinculados, o desconto incide so' sobre o subtotal desses itens.
+  const produtosDoCupom = db.prepare('SELECT produto_id FROM cupom_produtos WHERE cupom_id = ?').all(cupom.id).map(r => r.produto_id);
+  const listaItens = Array.isArray(itens) ? itens : [];
+  const itensAplicaveis = produtosDoCupom.length
+    ? listaItens.filter(i => produtosDoCupom.includes(i.produto_id))
+    : listaItens;
+  const base = Math.max(0, itensAplicaveis.reduce((s, i) => s + i.preco_unitario * i.quantidade, 0));
+
+  if (produtosDoCupom.length && base === 0) {
+    return { valido: false, codigo, desconto: 0, motivo: 'Este cupom não se aplica aos produtos do seu carrinho.' };
+  }
+
+  const bruto = cupom.tipo === 'percentual' ? base * (cupom.valor / 100) : cupom.valor;
+  const desconto = Math.round(Math.min(Math.max(bruto, 0), base) * 100) / 100;
+
+  return {
+    valido: desconto > 0,
+    codigo: cupom.codigo,
+    desconto,
+    motivo: desconto > 0 ? null : 'Cupom sem desconto aplicável a este carrinho.'
+  };
+}
+
+// Conta mais um uso do cupom. Chamada só depois que o pedido é gravado de
+// verdade (routes/pedidos.js), nunca na validação/preview.
+function registrarUsoCupom(codigo) {
+  if (!codigo) return;
+  db.prepare('UPDATE cupons SET usos_atuais = usos_atuais + 1 WHERE UPPER(codigo) = ?').run(String(codigo).toUpperCase());
+}
+
+// GET /api/cupons/validar?codigo=BEMVINDO10 — usa o carrinho de verdade da sessão/usuário.
+router.get('/validar', (req, res) => {
+  const carrinho = obterCarrinhoAtual(req);
+  const { itens } = montarRespostaCarrinho(carrinho);
+  res.json(avaliarCupom(req.query.codigo, itens));
+});
+
+module.exports = { router, avaliarCupom, registrarUsoCupom };

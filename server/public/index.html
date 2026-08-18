@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Estância Salvarte — Artigos Gaúchos, Confecção e Serviços</title>
+<link rel="icon" href="/img/favicon.png">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app-header"></div>
+
+<div class="layout-home">
+
+  <!-- ---------- Esquerda: categorias ---------- -->
+  <aside class="coluna-lateral">
+    <nav class="menu-categorias">
+      <h3>Categorias</h3>
+      <div class="lista" id="menu-categorias"><p class="vazio-mini">Carregando...</p></div>
+    </nav>
+  </aside>
+
+  <!-- ---------- Centro: vitrine ---------- -->
+  <main>
+    <div class="vitrine-topo">
+      <div class="titulo">
+        <span class="selo-secao" id="vitrine-selo">Seleção da casa</span>
+        <h2 id="vitrine-titulo">Destaques da loja</h2>
+        <p class="subtitulo" id="vitrine-subtitulo">Peças escolhidas pela loja — tradição gaúcha pronta para vestir.</p>
+        <span class="contagem" id="vitrine-contagem"></span>
+      </div>
+      <div class="vitrine-controles">
+        <input type="search" id="vitrine-busca" placeholder="Buscar produto pelo nome ou descrição...">
+        <select id="vitrine-ordem" title="Ordenar a vitrine">
+          <option value="nome">Ordem: nome (A–Z)</option>
+          <option value="nome_desc">Ordem: nome (Z–A)</option>
+          <option value="menor_preco">Ordem: menor preço</option>
+          <option value="maior_preco">Ordem: maior preço</option>
+          <option value="novidades">Ordem: novidades</option>
+        </select>
+        <button class="btn pequeno secundario" id="vitrine-limpar"
+                style="border-color:var(--couro);color:var(--couro);display:none;">← Ver destaques</button>
+      </div>
+    </div>
+
+    <section class="carrossel" id="vitrine-palco">
+      <button class="carrossel-btn anterior" id="carrossel-anterior" aria-label="Produtos anteriores" hidden>‹</button>
+      <div class="carrossel-trilho" id="vitrine-trilho" tabindex="0" aria-label="Vitrine de produtos"></div>
+      <button class="carrossel-btn proximo" id="carrossel-proximo" aria-label="Próximos produtos" hidden>›</button>
+      <div class="carrossel-pontos" id="carrossel-pontos" hidden></div>
+    </section>
+  </main>
+
+  <!-- ---------- Direita: carrinho ---------- -->
+  <aside class="coluna-lateral coluna-carrinho">
+    <div class="painel-carrinho">
+      <h3>Seu carrinho <span class="qtd" id="painel-qtd">0</span></h3>
+      <div class="itens" id="painel-itens"></div>
+      <div class="rodape" id="painel-rodape"></div>
+    </div>
+  </aside>
+
+</div>
+
+<div class="aviso-carrinho" id="aviso-carrinho"></div>
+<div id="app-footer"></div>
+
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+const EMOJI_CATEGORIA = {
+  'bombachas-femininas': '👖', 'bombachas-masculinas': '🤠', 'calcas-cargo': '🧥', 'saias': '👗', 'linha-infantil': '🧒',
+  'linha-verao': '👕', 'linha-inverno': '🧣', 'linha-uniformes': '👔', 'alpargatas': '🥿',
+  'botas': '🥾', 'erva-mate-bebidas': '🧉', 'servicos': '🧵'
+};
+
+// Estado da vitrine. Sem categoria e sem busca = carrossel de destaques.
+const vitrine = { categoria: '', busca: '', ordem: 'nome', categorias: [] };
+
+// ==================== MENU DE CATEGORIAS ====================
+async function carregarCategorias() {
+  vitrine.categorias = await Api.get('/api/categorias');
+  const menu = document.getElementById('menu-categorias');
+
+  menu.innerHTML = `
+    <a href="#" data-slug="" class="ativo"><span class="emoji">⭐</span><span class="nome">Destaques</span></a>
+    ${vitrine.categorias.map(c => `
+      <a href="#" data-slug="${c.slug}">
+        <span class="emoji">${EMOJI_CATEGORIA[c.slug] || '🛍️'}</span>
+        <span class="nome">${escapeHtml(c.nome)}</span>
+        <span class="qtd">${c.total_produtos}</span>
+      </a>
+    `).join('')}
+  `;
+
+  menu.querySelectorAll('[data-slug]').forEach(link => link.addEventListener('click', (e) => {
+    e.preventDefault();
+    vitrine.categoria = link.dataset.slug;
+    vitrine.busca = '';
+    document.getElementById('vitrine-busca').value = '';
+    marcarCategoriaAtiva();
+    carregarVitrine();
+  }));
+}
+
+function marcarCategoriaAtiva() {
+  document.querySelectorAll('#menu-categorias [data-slug]').forEach(a => {
+    a.classList.toggle('ativo', a.dataset.slug === vitrine.categoria);
+  });
+}
+
+// ==================== VITRINE / CARROSSEL ====================
+// Produto cadastrado nos ultimos 30 dias ganha o selo "Novidade".
+const DIAS_NOVIDADE = 30;
+function ehNovidade(p) {
+  if (!p.criado_em) return false;
+  const criado = new Date(p.criado_em.replace(' ', 'T'));
+  if (Number.isNaN(criado.getTime())) return false;
+  return (Date.now() - criado.getTime()) < DIAS_NOVIDADE * 24 * 60 * 60 * 1000;
+}
+
+// Quantos cards entram na primeira tela: essas fotos carregam com prioridade,
+// porque sao a primeira impressao da loja. O resto vem sob demanda.
+const CARDS_ACIMA_DA_DOBRA = 4;
+
+// A foto do produto e' o que vende: ocupa o topo do card em 3:4 e cresce no
+// hover. Sem foto cadastrada, entra um espaco de marca com o icone da
+// categoria — nunca um vazio cinza.
+function fotoVitrine(p, indice) {
+  if (p.imagem_url) {
+    const prioritaria = indice < CARDS_ACIMA_DA_DOBRA;
+    return `<img src="${escapeHtml(p.imagem_url)}" alt="${escapeHtml(p.nome)}"
+                 loading="${prioritaria ? 'eager' : 'lazy'}"
+                 fetchpriority="${prioritaria ? 'high' : 'auto'}" decoding="async">`;
+  }
+  const emoji = EMOJI_CATEGORIA[p.categoria_slug] || '🛍️';
+  return `<span class="marca-dagua" aria-hidden="true">
+            <span class="icone">${emoji}</span>
+            <span class="assinatura">Estância Salvarte</span>
+          </span>`;
+}
+
+// Um selo por card, na ordem de quem mais convence: oferta, novidade, destaque.
+// No carrossel de destaques o selo "Destaque" fica de fora — seria repetir o
+// titulo da seccao em cima de cada peca.
+function seloDe(p, modoDestaques) {
+  if (p.em_promocao) {
+    const desconto = Math.round((1 - p.preco_promocional / p.preco_venda) * 100);
+    return { tipo: 'promo', texto: desconto > 0 ? `−${desconto}%` : 'Oferta' };
+  }
+  if (ehNovidade(p)) return { tipo: 'novidade', texto: 'Novidade' };
+  if (p.destaque && !modoDestaques) return { tipo: 'destaque', texto: 'Destaque' };
+  return null;
+}
+
+function cardVitrine(p, selo, indice) {
+  const precos = p.em_promocao
+    ? `<span class="preco-antigo">${formatarMoeda(p.preco_venda)}</span>
+       <div class="preco">${formatarMoeda(p.preco_promocional)}</div>`
+    : `<div class="preco">${formatarMoeda(p.preco_venda)}</div>`;
+
+  // Tipo de estoque vem PRIMEIRO: montarProduto() devolve disponivel = true para
+  // peca sob encomenda (ela pode ser pedida sempre), entao testar disponivel
+  // antes anunciaria "Em estoque" para quem trabalha sob encomenda.
+  const disponibilidade = p.tipo_estoque === 'sob_encomenda'
+    ? '<span class="badge alerta">Sob encomenda</span>'
+    : (p.disponivel
+        ? '<span class="badge ok">Em estoque</span>'
+        : '<span class="badge indisponivel">Esgotado</span>');
+
+  // Produto com tamanho ou cor precisa da escolha do cliente: manda para a
+  // pagina do produto. Sem variacao, adiciona direto daqui.
+  const temVariacao = (p.tamanhos && p.tamanhos.length) || (p.cores && p.cores.length);
+  const botaoCarrinho = temVariacao
+    ? `<a class="btn pequeno" href="/produto.html?id=${p.id}">Escolher</a>`
+    : `<button class="btn pequeno" data-add="${p.id}">+ Carrinho</button>`;
+
+  // Amostra de cores: mostra na hora que a peca tem opcoes, sem abrir o produto.
+  const amostras = (p.cores || []).slice(0, 5).map(c =>
+    `<i style="background:${escapeHtml(c.cor_hex)}" title="${escapeHtml(c.cor_nome)}"></i>`).join('');
+  const sobras = (p.cores || []).length > 5 ? `<em>+${p.cores.length - 5}</em>` : '';
+
+  return `
+    <article class="vitrine-card ${p.em_promocao ? 'oferta' : ''} ${p.imagem_url ? 'com-foto' : 'sem-foto'}">
+      ${selo ? `<span class="selo ${selo.tipo}">${escapeHtml(selo.texto)}</span>` : ''}
+      <a class="thumb" href="/produto.html?id=${p.id}" aria-label="Ver ${escapeHtml(p.nome)}">
+        ${fotoVitrine(p, indice)}
+        <span class="veja-mais">Ver detalhes</span>
+      </a>
+      <div class="corpo">
+        <span class="cat">${escapeHtml(p.categoria_nome || '')}</span>
+        <a href="/produto.html?id=${p.id}"><h4>${escapeHtml(p.nome)}</h4></a>
+        ${amostras ? `<div class="amostras">${amostras}${sobras}</div>` : ''}
+        ${disponibilidade}
+        <div class="precos">${precos}</div>
+        <div class="acoes">
+          <a class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" href="/produto.html?id=${p.id}">Ver</a>
+          ${botaoCarrinho}
+        </div>
+      </div>
+    </article>`;
+}
+
+// ---------- Slide de destaque (um produto por vez, vitrine inteira) ----------
+// Na abertura da pagina cada produto aparece sozinho, ocupando toda a largura
+// da vitrine: foto grande de um lado, ficha do outro. E' o formato que dá espaço
+// para a peça convencer o cliente.
+function slideDestaque(p, selo, indice) {
+  const precos = p.em_promocao
+    ? `<span class="preco-antigo">${formatarMoeda(p.preco_venda)}</span>
+       <div class="preco">${formatarMoeda(p.preco_promocional)}</div>
+       <small class="economia">Você economiza ${formatarMoeda(p.preco_venda - p.preco_promocional)}</small>`
+    : `<div class="preco">${formatarMoeda(p.preco_venda)}</div>`;
+
+  // Tipo de estoque vem PRIMEIRO: montarProduto() devolve disponivel = true para
+  // peca sob encomenda (ela pode ser pedida sempre), entao testar disponivel
+  // antes anunciaria "Em estoque" para quem trabalha sob encomenda.
+  const disponibilidade = p.tipo_estoque === 'sob_encomenda'
+    ? '<span class="badge alerta">Sob encomenda</span>'
+    : (p.disponivel
+        ? '<span class="badge ok">Em estoque</span>'
+        : '<span class="badge indisponivel">Esgotado</span>');
+
+  const temVariacao = (p.tamanhos && p.tamanhos.length) || (p.cores && p.cores.length);
+  const botaoCarrinho = temVariacao
+    ? `<a class="btn" href="/produto.html?id=${p.id}">Escolher tamanho e cor</a>`
+    : `<button class="btn" data-add="${p.id}">+ Adicionar ao carrinho</button>`;
+
+  const tamanhos = (p.tamanhos || []).length
+    ? `<div class="linha-variacao"><span class="rotulo">Tamanhos</span>
+         <span class="valores">${escapeHtml(p.tamanhos.slice(0, 12).join(' · '))}${p.tamanhos.length > 12 ? ' …' : ''}</span></div>`
+    : '';
+
+  const cores = (p.cores || []).length
+    ? `<div class="linha-variacao"><span class="rotulo">Cores</span>
+         <span class="valores amostras">${p.cores.map(c =>
+           `<i style="background:${escapeHtml(c.cor_hex)}" title="${escapeHtml(c.cor_nome)}"></i>`).join('')}</span></div>`
+    : '';
+
+  const descricao = (p.descricao || '').trim();
+
+  return `
+    <article class="slide-destaque ${p.em_promocao ? 'oferta' : ''}">
+      <a class="palco-foto" href="/produto.html?id=${p.id}" aria-label="Ver ${escapeHtml(p.nome)}">
+        ${selo ? `<span class="selo ${selo.tipo}">${escapeHtml(selo.texto)}</span>` : ''}
+        ${fotoVitrine(p, indice)}
+      </a>
+      <div class="ficha">
+        <span class="cat">${escapeHtml(p.categoria_nome || '')}</span>
+        <a href="/produto.html?id=${p.id}"><h3>${escapeHtml(p.nome)}</h3></a>
+        ${p.codigo ? `<span class="ref">Ref. ${escapeHtml(p.codigo)}</span>` : ''}
+        ${descricao ? `<p class="descricao">${escapeHtml(descricao)}</p>` : ''}
+        ${tamanhos}
+        ${cores}
+        <div class="estado">${disponibilidade}</div>
+        <div class="precos">${precos}</div>
+        <div class="acoes">
+          ${botaoCarrinho}
+          <a class="btn secundario" style="border-color:var(--couro);color:var(--couro);" href="/produto.html?id=${p.id}">Ver detalhes</a>
+        </div>
+      </div>
+    </article>`;
+}
+
+// Fantasma enquanto a vitrine carrega: a pagina abre com forma, nao com a
+// palavra "Carregando". No modo destaque e' um slide; na grade, varios cards.
+function esqueletoVitrine(umPorVez) {
+  if (umPorVez) {
+    return `<article class="slide-destaque esqueleto" aria-hidden="true">
+      <div class="palco-foto"></div>
+      <div class="ficha">
+        <span class="linha curta"></span><span class="linha"></span>
+        <span class="linha media"></span><span class="linha curta"></span>
+      </div>
+    </article>`;
+  }
+  return Array.from({ length: 4 }, () => `
+    <article class="vitrine-card esqueleto" aria-hidden="true">
+      <div class="thumb"></div>
+      <div class="corpo">
+        <span class="linha curta"></span>
+        <span class="linha"></span>
+        <span class="linha media"></span>
+      </div>
+    </article>`).join('');
+}
+
+async function carregarVitrine() {
+  const trilho = document.getElementById('vitrine-trilho');
+  const palco = document.getElementById('vitrine-palco');
+  const consulta = new URLSearchParams();
+
+  // Destaques so aparecem quando o cliente nao filtrou nada ainda.
+  const modoDestaques = !vitrine.categoria && !vitrine.busca;
+  if (modoDestaques) consulta.set('destaque', '1');
+  if (vitrine.categoria) consulta.set('categoria', vitrine.categoria);
+  if (vitrine.busca) consulta.set('busca', vitrine.busca);
+  consulta.set('ordem', vitrine.ordem);
+
+  pararGiroAutomatico();
+  palco.classList.toggle('um-por-vez', modoDestaques);
+  palco.classList.toggle('em-grade', !modoDestaques);
+  trilho.innerHTML = esqueletoVitrine(modoDestaques);
+
+  let produtos = await Api.get('/api/produtos?' + consulta.toString());
+
+  // Loja sem nenhum produto marcado como destaque: mostra a vitrine geral
+  // em vez de deixar a home vazia.
+  let semDestaques = false;
+  if (modoDestaques && produtos.length === 0) {
+    semDestaques = true;
+    produtos = await Api.get('/api/produtos?ordem=' + vitrine.ordem);
+  }
+
+  const categoriaAtual = vitrine.categorias.find(c => c.slug === vitrine.categoria);
+  const titulo = vitrine.busca ? `Resultados para "${vitrine.busca}"`
+    : categoriaAtual ? categoriaAtual.nome
+    : semDestaques ? 'Nossos produtos'
+    : 'Destaques da loja';
+
+  const selo = vitrine.busca ? 'Busca'
+    : categoriaAtual ? 'Categoria'
+    : semDestaques ? 'Loja completa'
+    : 'Seleção da casa';
+
+  const subtitulo = vitrine.busca ? 'Encontrou o que procurava? Clique na peça para ver tamanhos e cores.'
+    : categoriaAtual ? (categoriaAtual.descricao || `Tudo de ${categoriaAtual.nome.toLowerCase()} disponível na loja.`)
+    : semDestaques ? 'Nossa linha completa — role para o lado e conheça as peças.'
+    : 'Peças escolhidas pela loja — tradição gaúcha pronta para vestir.';
+
+  document.getElementById('vitrine-titulo').textContent = titulo;
+  document.getElementById('vitrine-selo').textContent = selo;
+  document.getElementById('vitrine-subtitulo').textContent = subtitulo;
+  document.getElementById('vitrine-contagem').textContent = produtos.length ? `${produtos.length} produto(s)` : '';
+  document.getElementById('vitrine-limpar').style.display = modoDestaques ? 'none' : 'inline-block';
+
+  // Abertura da pagina = um destaque por vez, girando sozinho. Categoria ou
+  // busca = grade, que e' o formato certo para comparar muitos itens.
+  const modoCarrossel = modoDestaques;
+
+  // Selo que apareceria em TODOS os cards nao informa nada (loja recem-
+  // cadastrada, por exemplo, deixaria tudo como "Novidade"): nesse caso ele
+  // sai da vitrine. Oferta e' excecao — desconto sempre vale ser anunciado.
+  const selos = produtos.map(p => seloDe(p, modoCarrossel));
+  const tipos = new Set(selos.map(s => (s ? s.tipo : null)));
+  if (selos.length > 1 && tipos.size === 1 && !tipos.has('promo')) selos.fill(null);
+
+  const montar = modoCarrossel ? slideDestaque : cardVitrine;
+  trilho.innerHTML = produtos.map((p, i) => montar(p, selos[i], i)).join('')
+    || '<p class="vazio">Nenhum produto encontrado. Tente outra categoria ou busca.</p>';
+
+  trilho.scrollLeft = 0;
+  remedirCarrossel();
+  if (modoCarrossel && produtos.length > 1) iniciarGiroAutomatico();
+
+  // Mouse sobre a FOTO do produto: o giro passa a esperar 10s em vez de 4s.
+  trilho.querySelectorAll('.palco-foto').forEach(foto => {
+    foto.addEventListener('mouseenter', () => marcarSobreFoto(true));
+    foto.addEventListener('mouseleave', () => marcarSobreFoto(false));
+  });
+
+  trilho.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => adicionarAoCarrinho(b.dataset.add, b)));
+}
+
+// ---------- Navegacao do carrossel ----------
+const trilho = () => document.getElementById('vitrine-trilho');
+const emGrade = () => document.getElementById('vitrine-palco').classList.contains('em-grade');
+const umPorVez = () => document.getElementById('vitrine-palco').classList.contains('um-por-vez');
+
+function atualizarSetas() {
+  const t = trilho();
+  const anterior = document.getElementById('carrossel-anterior');
+  const proximo = document.getElementById('carrossel-proximo');
+  const temOverflow = !emGrade() && t.scrollWidth > t.clientWidth + 4;
+  anterior.hidden = !temOverflow;
+  proximo.hidden = !temOverflow;
+
+  // No modo destaque a vitrine e' um ciclo: as setas dao a volta e por isso
+  // nunca ficam inertes. Na grade rolavel, apagam ao chegar na ponta.
+  const ciclo = umPorVez();
+  anterior.classList.toggle('inerte', !ciclo && t.scrollLeft <= 4);
+  proximo.classList.toggle('inerte', !ciclo && t.scrollLeft >= t.scrollWidth - t.clientWidth - 4);
+  destacarPontoAtual();
+}
+
+// Largura de um item + o espaco entre eles: o passo do carrossel e' sempre
+// um numero inteiro de itens, para nunca parar cortando uma peca no meio.
+// No modo destaque cada slide ocupa 100% do trilho, entao o passo e' uma tela.
+function passoCard() {
+  const t = trilho();
+  const card = t.querySelector('.slide-destaque, .vitrine-card');
+  if (!card) return t.clientWidth;
+  const espaco = parseFloat(getComputedStyle(t).columnGap || getComputedStyle(t).gap || 0) || 0;
+  const largura = card.getBoundingClientRect().width + espaco;
+  const cabem = Math.max(1, Math.floor(t.clientWidth / largura));
+  return largura * cabem;
+}
+
+// Posicoes em que o trilho de fato para. A ultima e' sempre o fim do trilho;
+// se a penultima ficaria colada nela (menos de meio passo), sai da lista — dois
+// pontinhos para praticamente a mesma vista so confundem.
+function paradasCarrossel() {
+  const t = trilho();
+  const maximo = t.scrollWidth - t.clientWidth;
+  if (maximo <= 4) return [0];
+  const passo = Math.max(1, passoCard());
+  // O inicio e' sempre parada: quando o transbordo e' menor que meio passo, o
+  // laco nao roda nenhuma vez e sem esta linha nao haveria como voltar.
+  const paradas = [0];
+  for (let x = passo; x < maximo - passo / 2; x += passo) paradas.push(x);
+  if (maximo - paradas[paradas.length - 1] > 4) paradas.push(maximo);
+  return paradas;
+}
+
+function paradaMaisProxima() {
+  const atual = trilho().scrollLeft;
+  const paradas = paradasCarrossel();
+  let indice = 0;
+  paradas.forEach((x, i) => {
+    if (Math.abs(x - atual) < Math.abs(paradas[indice] - atual)) indice = i;
+  });
+  return indice;
+}
+
+function irParaParada(indice) {
+  const paradas = paradasCarrossel();
+  const alvo = paradas[Math.max(0, Math.min(paradas.length - 1, indice))];
+  trilho().scrollTo({ left: alvo, behavior: 'smooth' });
+}
+
+// Setas e pontinhos andam pelas mesmas paradas, entao nunca discordam.
+// No modo destaque a lista e' circular: depois do ultimo vem o primeiro.
+function deslizar(direcao) {
+  const total = paradasCarrossel().length;
+  const alvo = paradaMaisProxima() + direcao;
+  irParaParada(umPorVez() ? ((alvo % total) + total) % total : alvo);
+}
+
+// ---------- Indicadores (pontinhos) ----------
+function montarPontos(totalProdutos, modoCarrossel) {
+  const area = document.getElementById('carrossel-pontos');
+  const paradas = paradasCarrossel();
+  if (!modoCarrossel || totalProdutos < 2 || paradas.length < 2) {
+    area.hidden = true;
+    area.innerHTML = '';
+    return;
+  }
+  area.hidden = false;
+  area.innerHTML = paradas.map((_, i) =>
+    `<button class="ponto" data-pagina="${i}" aria-label="Ir para a parte ${i + 1} de ${paradas.length} da vitrine"></button>`).join('');
+  area.querySelectorAll('[data-pagina]').forEach(b => b.addEventListener('click', () => {
+    irParaParada(Number(b.dataset.pagina));
+    reagendarGiro(); // o relogio recomeca: o cliente acabou de escolher onde olhar
+  }));
+  destacarPontoAtual();
+}
+
+function destacarPontoAtual() {
+  const area = document.getElementById('carrossel-pontos');
+  if (area.hidden) return;
+  const atual = paradaMaisProxima();
+  area.querySelectorAll('[data-pagina]').forEach(b =>
+    b.classList.toggle('ativo', Number(b.dataset.pagina) === atual));
+}
+
+// ---------- Giro automatico ----------
+// Troca de produto a cada 4s e volta ao primeiro quando chega no fim, girando
+// sem parar. Com o mouse parado sobre a FOTO do produto o tempo sobe para 10s:
+// quem esta olhando a peca ganha folga para ler, sem travar a vitrine.
+const GIRO_NORMAL = 4000;
+const GIRO_SOBRE_FOTO = 10000;
+
+let relogioCarrossel = null;   // timeout do proximo giro
+let giroLigado = false;        // se a vitrine esta no modo que gira
+let mouseSobreFoto = false;
+
+function podeGirar() {
+  return giroLigado && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+// Um timeout reagendado a cada volta (e nao um setInterval) porque o intervalo
+// muda no meio do caminho, quando o mouse entra ou sai da foto.
+function agendarProximoGiro() {
+  clearTimeout(relogioCarrossel);
+  if (!podeGirar()) return;
+  relogioCarrossel = setTimeout(() => {
+    const t = trilho();
+    const fim = t.scrollLeft >= t.scrollWidth - t.clientWidth - 4;
+    if (fim) t.scrollTo({ left: 0, behavior: 'smooth' });
+    else irParaParada(paradaMaisProxima() + 1);
+    agendarProximoGiro();
+  }, mouseSobreFoto ? GIRO_SOBRE_FOTO : GIRO_NORMAL);
+}
+
+// Recomeca a contagem do zero. Usado quando o cliente navega na mao: ninguem
+// quer clicar na seta e ver a vitrine pular sozinha meio segundo depois.
+function reagendarGiro() {
+  agendarProximoGiro();
+}
+
+function iniciarGiroAutomatico() {
+  giroLigado = true;
+  mouseSobreFoto = false;
+  agendarProximoGiro();
+}
+
+function pararGiroAutomatico() {
+  giroLigado = false;
+  clearTimeout(relogioCarrossel);
+  relogioCarrossel = null;
+}
+
+// Entrar ou sair da foto troca o tempo e reinicia a contagem, para o novo
+// intervalo valer a partir de agora.
+function marcarSobreFoto(dentro) {
+  if (mouseSobreFoto === dentro) return;
+  mouseSobreFoto = dentro;
+  agendarProximoGiro();
+}
+
+document.getElementById('carrossel-anterior').addEventListener('click', () => { deslizar(-1); reagendarGiro(); });
+document.getElementById('carrossel-proximo').addEventListener('click', () => { deslizar(1); reagendarGiro(); });
+
+// Teclado: o trilho tem foco, entao as setas navegam a vitrine.
+trilho().addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  e.preventDefault();
+  deslizar(e.key === 'ArrowRight' ? 1 : -1);
+  reagendarGiro();
+});
+
+// Arraste/rolagem na mao tambem reinicia a contagem.
+document.getElementById('vitrine-palco').addEventListener('pointerdown', reagendarGiro);
+document.getElementById('vitrine-palco').addEventListener('wheel', reagendarGiro, { passive: true });
+
+trilho().addEventListener('scroll', atualizarSetas);
+
+// Remede as setas e os pontos sempre que o trilho mudar de tamanho. O evento
+// de resize da janela nao cobre tudo: aba aberta em segundo plano, coluna que
+// aparece depois ou fonte que carrega tarde mudam a largura sem redimensionar
+// a janela — e ai as setas ficariam escondidas para sempre.
+function remedirCarrossel() {
+  // Trilho sem largura util (aba aberta em segundo plano, coluna que ainda nao
+  // foi montada): medir agora daria conta errada e ela ficaria congelada na
+  // tela. Melhor nao mexer — o proximo aviso do observer vem com a largura real.
+  if (trilho().clientWidth < 1) return;
+  atualizarSetas();
+  // Conta os dois formatos: slide de destaque e card de grade.
+  const itens = trilho().querySelectorAll('.slide-destaque:not(.esqueleto), .vitrine-card:not(.esqueleto)').length;
+  montarPontos(itens, !emGrade());
+}
+
+window.addEventListener('resize', remedirCarrossel);
+if (window.ResizeObserver) new ResizeObserver(remedirCarrossel).observe(trilho());
+
+// ==================== CARRINHO LATERAL ====================
+function avisar(texto) {
+  const aviso = document.getElementById('aviso-carrinho');
+  aviso.textContent = texto;
+  aviso.classList.add('visivel');
+  clearTimeout(avisar.temporizador);
+  avisar.temporizador = setTimeout(() => aviso.classList.remove('visivel'), 2200);
+}
+
+async function adicionarAoCarrinho(produtoId, botao) {
+  if (botao) { botao.disabled = true; botao.textContent = 'Adicionando...'; }
+  try {
+    await Api.post('/api/carrinho/itens', { produto_id: Number(produtoId), quantidade: 1 });
+    await Promise.all([renderizarCarrinho(), atualizarContadorCarrinho()]);
+    avisar('Produto adicionado ao carrinho ✔');
+  } catch (e) {
+    avisar(e.message);
+  } finally {
+    if (botao) { botao.disabled = false; botao.textContent = '+ Carrinho'; }
+  }
+}
+
+async function removerDoCarrinho(itemId) {
+  await Api.del('/api/carrinho/itens/' + itemId);
+  await Promise.all([renderizarCarrinho(), atualizarContadorCarrinho()]);
+}
+
+async function renderizarCarrinho() {
+  const areaItens = document.getElementById('painel-itens');
+  const areaRodape = document.getElementById('painel-rodape');
+  const carrinho = await Api.get('/api/carrinho');
+
+  const unidades = carrinho.itens.reduce((s, i) => s + i.quantidade, 0);
+  document.getElementById('painel-qtd').textContent = unidades;
+
+  if (!carrinho.itens.length) {
+    areaItens.innerHTML = '<p class="vazio-mini">Seu carrinho está vazio.<br>Adicione produtos da vitrine ao lado.</p>';
+    areaRodape.innerHTML = '';
+    return;
+  }
+
+  areaItens.innerHTML = carrinho.itens.map(i => `
+    <div class="item">
+      <div class="mini">${i.imagem_url ? `<img src="${escapeHtml(i.imagem_url)}" alt="">` : '🛍️'}</div>
+      <div class="dados">
+        <strong>${escapeHtml(i.produto_nome)}</strong>
+        <small>${i.quantidade}x ${formatarMoeda(i.preco_unitario)}${i.tamanho ? ' · ' + escapeHtml(i.tamanho) : ''}${i.cor ? ' · ' + escapeHtml(i.cor) : ''}</small>
+      </div>
+      <button class="remover" data-remover="${i.id}" title="Remover">✕</button>
+    </div>
+  `).join('');
+
+  areaRodape.innerHTML = `
+    <div class="total"><span>Total</span><span class="valor">${formatarMoeda(carrinho.total)}</span></div>
+    <a class="btn" href="/checkout.html">Finalizar compra</a>
+    <a class="btn secundario mt-1" href="/carrinho.html"
+       style="border-color:var(--couro);color:var(--couro);display:block;">Ver carrinho completo</a>
+  `;
+
+  areaItens.querySelectorAll('[data-remover]').forEach(b =>
+    b.addEventListener('click', () => removerDoCarrinho(b.dataset.remover)));
+}
+
+// ==================== FILTROS DA VITRINE ====================
+let temporizadorBusca;
+document.getElementById('vitrine-busca').addEventListener('input', (e) => {
+  clearTimeout(temporizadorBusca);
+  temporizadorBusca = setTimeout(() => {
+    vitrine.busca = e.target.value.trim();
+    carregarVitrine();
+  }, 300);
+});
+
+document.getElementById('vitrine-ordem').addEventListener('change', (e) => {
+  vitrine.ordem = e.target.value;
+  carregarVitrine();
+});
+
+document.getElementById('vitrine-limpar').addEventListener('click', () => {
+  vitrine.categoria = '';
+  vitrine.busca = '';
+  document.getElementById('vitrine-busca').value = '';
+  marcarCategoriaAtiva();
+  carregarVitrine();
+});
+
+// ==================== INICIO ====================
+carregarCategorias().then(carregarVitrine);
+renderizarCarrinho();
+</script>
+</body>
+</html>

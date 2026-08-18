@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catálogo — Estância Salvarte</title>
+<link rel="icon" href="/img/favicon.png">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app-header"></div>
+
+<section class="container mt-2">
+  <div class="section-title">
+    <h2>Catálogo</h2>
+    <p>Todos os nossos produtos, por categoria</p>
+  </div>
+  <div class="filtros">
+    <select id="filtro-categoria"><option value="">Todas as categorias</option></select>
+    <input type="search" id="filtro-busca" placeholder="Buscar produto pelo nome...">
+  </div>
+  <div class="produtos-grid" id="grid-produtos"><p class="vazio">Carregando...</p></div>
+</section>
+
+<div id="app-footer"></div>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+const EMOJI_CATEGORIA = {
+  'bombachas-femininas': '👖', 'bombachas-masculinas': '🤠', 'calcas-cargo': '🧥', 'saias': '👗', 'linha-infantil': '🧒',
+  'linha-verao': '👕', 'linha-inverno': '🧣', 'linha-uniformes': '👔', 'alpargatas': '🥿',
+  'botas': '🥾', 'erva-mate-bebidas': '🧉', 'servicos': '🧵'
+};
+const params = new URLSearchParams(window.location.search);
+
+function cardProdutoHtml(p) {
+  // Sob encomenda tem prioridade: disponivel e' true para essas pecas.
+  const status = p.tipo_estoque === 'sob_encomenda'
+    ? '<span class="badge alerta">Sob encomenda</span>'
+    : (p.disponivel ? '<span class="badge ok">Em estoque</span>' : '<span class="badge indisponivel">Esgotado</span>');
+  return `
+    <a class="produto-card" href="/produto.html?id=${p.id}">
+      <div class="thumb">${p.imagem_url ? `<img src="${p.imagem_url}" alt="${escapeHtml(p.nome)}">` : (EMOJI_CATEGORIA[p.categoria_slug] || '🛍️')}</div>
+      <div class="corpo">
+        <span class="cat">${escapeHtml(p.categoria_nome || '')}</span>
+        <h4>${escapeHtml(p.nome)}</h4>
+        ${status}
+        <span class="preco">${formatarMoeda(p.preco_venda)}</span>
+      </div>
+    </a>
+  `;
+}
+
+async function carregarFiltroCategorias() {
+  const categorias = await Api.get('/api/categorias');
+  const select = document.getElementById('filtro-categoria');
+  select.innerHTML += categorias.map(c => `<option value="${c.slug}">${escapeHtml(c.nome)}</option>`).join('');
+  if (params.get('categoria')) select.value = params.get('categoria');
+}
+
+async function carregarProdutos() {
+  const grid = document.getElementById('grid-produtos');
+  const categoria = document.getElementById('filtro-categoria').value;
+  const busca = document.getElementById('filtro-busca').value.trim();
+  const query = new URLSearchParams();
+  if (categoria) query.set('categoria', categoria);
+  if (busca) query.set('busca', busca);
+  const produtos = await Api.get('/api/produtos?' + query.toString());
+  grid.innerHTML = produtos.map(cardProdutoHtml).join('') || '<p class="vazio">Nenhum produto encontrado.</p>';
+}
+
+document.getElementById('filtro-categoria').addEventListener('change', carregarProdutos);
+let debounce;
+document.getElementById('filtro-busca').addEventListener('input', () => {
+  clearTimeout(debounce);
+  debounce = setTimeout(carregarProdutos, 300);
+});
+
+carregarFiltroCategorias().then(carregarProdutos);
+</script>
+</body>
+</html>

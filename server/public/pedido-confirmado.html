@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pedido confirmado — Estância Salvarte</title>
+<link rel="icon" href="/img/favicon.png">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+/* Pesquisa de satisfacao: objetiva, uma tela, sem rolagem longa. */
+.csat .pergunta { margin-top: 1.1rem; }
+.csat .pergunta > span { display: block; font-size: .88rem; font-weight: 600; margin-bottom: .35rem; }
+.csat .notas { display: flex; gap: .4rem; flex-wrap: wrap; }
+.csat .notas label { margin: 0; flex: 1; min-width: 44px; }
+.csat .notas input { position: absolute; opacity: 0; width: 0; height: 0; }
+.csat .notas span {
+  display: block; text-align: center; cursor: pointer; user-select: none;
+  border: 1.5px solid var(--creme-escuro); border-radius: 8px; padding: .5rem .2rem;
+  font-weight: 700; font-size: .95rem; background: #fff; transition: .12s;
+}
+.csat .notas input:checked + span { background: var(--dourado); border-color: var(--couro); }
+.csat .notas label:hover span { border-color: var(--dourado); }
+.csat .escala { display: flex; justify-content: space-between; font-size: .72rem; color: var(--texto-suave); margin-top: .25rem; }
+.csat .sim-nao { display: flex; gap: .5rem; }
+.csat .sim-nao label { margin: 0; flex: 1; }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+
+<section class="container mt-2">
+  <div class="form-card text-center">
+    <h2>🎉 Pedido recebido!</h2>
+    <p id="detalhe-pedido">Carregando...</p>
+    <a href="/index.html" class="btn mt-1">Continuar comprando</a>
+  </div>
+
+  <!-- ---------- Pesquisa de satisfação ---------- -->
+  <div class="form-card csat mt-2" id="bloco-csat" style="display:none;">
+    <h3 style="text-align:center;">Como foi sua experiência?</h3>
+    <p style="text-align:center;font-size:.85rem;color:var(--texto-suave);margin-top:0;">
+      Leva menos de 30 segundos e nos ajuda muito a melhorar.
+    </p>
+
+    <div class="pergunta">
+      <span>1. Os preços que você encontrou aqui foram…</span>
+      <div class="notas" data-grupo="nota_precos"></div>
+      <div class="escala"><em>caros</em><em>muito justos</em></div>
+    </div>
+
+    <div class="pergunta">
+      <span>2. Como foi usar o site para comprar?</span>
+      <div class="notas" data-grupo="nota_site"></div>
+      <div class="escala"><em>difícil</em><em>muito fácil</em></div>
+    </div>
+
+    <div class="pergunta">
+      <span>3. Sua experiência geral com a Estância Salvarte</span>
+      <div class="notas" data-grupo="nota_geral"></div>
+      <div class="escala"><em>ruim</em><em>excelente</em></div>
+    </div>
+
+    <div class="pergunta">
+      <span>4. Esta foi sua primeira compra conosco?</span>
+      <div class="sim-nao">
+        <label><input type="radio" name="primeira_compra" value="1" style="width:auto;"> Sim, primeira vez</label>
+        <label><input type="radio" name="primeira_compra" value="0" style="width:auto;"> Não, já sou cliente</label>
+      </div>
+    </div>
+
+    <div class="pergunta">
+      <span>5. Você recomendaria a loja para alguém?</span>
+      <div class="sim-nao">
+        <label><input type="radio" name="recomendaria" value="1" style="width:auto;"> Recomendaria</label>
+        <label><input type="radio" name="recomendaria" value="0" style="width:auto;"> Não recomendaria</label>
+      </div>
+    </div>
+
+    <div class="pergunta">
+      <span>6. Quer deixar um comentário? (opcional)</span>
+      <textarea id="csat-comentario" placeholder="O que podemos melhorar?"></textarea>
+    </div>
+
+    <button class="btn mt-2" id="csat-enviar" style="width:100%;">Enviar avaliação</button>
+    <p id="csat-msg" class="msg" style="display:none;"></p>
+  </div>
+</section>
+
+<div id="app-footer"></div>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+const params = new URLSearchParams(window.location.search);
+const pedidoId = params.get('pedido');
+const aviso = params.get('aviso');
+
+const ROTULOS_STATUS = {
+  aguardando_pagamento: 'aguardando pagamento',
+  pago: 'pago',
+  enviado: 'enviado',
+  recebido: 'recebido',
+  finalizado: 'finalizado',
+  cancelado: 'cancelado'
+};
+
+// ---------- Detalhe do pedido ----------
+async function carregarPedido() {
+  const el = document.getElementById('detalhe-pedido');
+  try {
+    const status = await Api.get('/api/pagamento/status/' + pedidoId);
+    const identificacao = status.codigo || status.id;
+    const desconto = status.valor_desconto > 0
+      ? `<br>Desconto (${escapeHtml(status.cupom || 'cupom')}): − ${formatarMoeda(status.valor_desconto)}`
+      : '';
+    el.innerHTML = `
+      Pedido <strong>${escapeHtml(identificacao)}</strong> —
+      status atual: <span class="chip ${status.status}">${ROTULOS_STATUS[status.status] || status.status}</span>
+      ${desconto}
+      <br>Total: <strong>${formatarMoeda(status.valor_final || status.total)}</strong>
+      ${aviso ? `<br><em>${escapeHtml(decodeURIComponent(aviso))}</em>` : ''}
+    `;
+  } catch (e) {
+    el.innerHTML = `Pedido nº ${escapeHtml(pedidoId || '')} registrado com sucesso.
+      ${aviso ? `<br><em>${escapeHtml(decodeURIComponent(aviso))}</em>` : ''}`;
+  }
+}
+
+// ---------- Pesquisa de satisfação ----------
+function montarNotas() {
+  document.querySelectorAll('.notas[data-grupo]').forEach(area => {
+    const grupo = area.dataset.grupo;
+    area.innerHTML = [1, 2, 3, 4, 5].map(n => `
+      <label><input type="radio" name="${grupo}" value="${n}"><span>${n}</span></label>
+    `).join('');
+  });
+}
+
+function valorSelecionado(nome) {
+  const escolhido = document.querySelector(`input[name="${nome}"]:checked`);
+  return escolhido ? escolhido.value : null;
+}
+
+async function prepararCsat() {
+  if (!pedidoId) return;
+  try {
+    const { respondido } = await Api.get('/api/csat/pedido/' + pedidoId);
+    if (respondido) return; // já avaliou este pedido
+  } catch (e) { return; }
+
+  montarNotas();
+  document.getElementById('bloco-csat').style.display = 'block';
+}
+
+document.getElementById('csat-enviar').addEventListener('click', async () => {
+  const msg = document.getElementById('csat-msg');
+  const botao = document.getElementById('csat-enviar');
+  msg.style.display = 'none';
+
+  const corpo = {
+    pedido_id: Number(pedidoId),
+    nota_precos: valorSelecionado('nota_precos'),
+    nota_site: valorSelecionado('nota_site'),
+    nota_geral: valorSelecionado('nota_geral'),
+    primeira_compra: valorSelecionado('primeira_compra'),
+    recomendaria: valorSelecionado('recomendaria'),
+    comentario: document.getElementById('csat-comentario').value
+  };
+
+  botao.disabled = true;
+  try {
+    await Api.post('/api/csat', corpo);
+    document.getElementById('bloco-csat').innerHTML = `
+      <div class="text-center">
+        <h3>Obrigado pela sua avaliação! 🙌</h3>
+        <p style="color:var(--texto-suave);font-size:.9rem;">
+          Sua opinião vai direto para a nossa equipe e ajuda a melhorar a próxima compra.
+        </p>
+        <a class="btn" href="/index.html">Voltar à loja</a>
+      </div>`;
+  } catch (e) {
+    msg.textContent = e.message;
+    msg.className = 'msg erro';
+    msg.style.display = 'block';
+    botao.disabled = false;
+  }
+});
+
+carregarPedido();
+prepararCsat();
+</script>
+</body>
+</html>

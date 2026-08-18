@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minha conta — Estância Salvarte</title>
+<link rel="icon" href="/img/favicon.png">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app-header"></div>
+<section class="container mt-2">
+  <h2>Minha conta</h2>
+  <div class="filtros">
+    <button class="btn pequeno" data-aba="pedidos">Meus pedidos</button>
+    <button class="btn pequeno secundario" style="color:var(--couro);border-color:var(--couro);" data-aba="interesses">Meus interesses</button>
+    <button class="btn pequeno secundario" style="color:var(--couro);border-color:var(--couro);" data-aba="agendamentos">Meus agendamentos</button>
+  </div>
+  <div id="conteudo-aba"><p class="vazio">Carregando...</p></div>
+</section>
+<div id="app-footer"></div>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+async function exigirLogin() {
+  const usuario = await Api.get('/api/auth/me');
+  if (!usuario) { window.location.href = '/login.html'; throw new Error('sem login'); }
+  return usuario;
+}
+
+async function abaPedidos() {
+  const pedidos = await Api.get('/api/pedidos/meus-pedidos');
+  const area = document.getElementById('conteudo-aba');
+  if (!pedidos.length) return area.innerHTML = '<p class="vazio">Você ainda não fez nenhum pedido.</p>';
+  area.innerHTML = pedidos.map(p => `
+    <div class="card">
+      <div class="flex entre">
+        <strong>Pedido #${p.id}</strong>
+        <span class="chip ${p.status}">${p.status}</span>
+      </div>
+      <p style="font-size:.85rem;color:var(--texto-suave);">${formatarData(p.criado_em.split(' ')[0])} — Total: ${formatarMoeda(p.total)}</p>
+      <ul style="margin:.3rem 0 0;padding-left:1.1rem;font-size:.85rem;">
+        ${p.itens.map(i => `<li>${i.quantidade}x ${escapeHtml(i.nome_produto)} (${escapeHtml(i.tamanho || '-')} / ${escapeHtml(i.cor || '-')})</li>`).join('')}
+      </ul>
+    </div>
+  `).join('');
+}
+
+async function abaInteresses() {
+  const itens = await Api.get('/api/interesses');
+  const area = document.getElementById('conteudo-aba');
+  if (!itens.length) return area.innerHTML = '<p class="vazio">Nenhum produto salvo como interesse ainda.</p>';
+  area.innerHTML = `<div class="produtos-grid">${itens.map(p => `
+    <a class="produto-card" href="/produto.html?id=${p.id}">
+      <div class="thumb">${p.imagem_url ? `<img src="${p.imagem_url}">` : '🛍️'}</div>
+      <div class="corpo"><h4>${escapeHtml(p.nome)}</h4><span class="preco">${formatarMoeda(p.preco_venda)}</span></div>
+    </a>`).join('')}</div>`;
+}
+
+async function abaAgendamentos() {
+  const agendamentos = await Api.get('/api/agendamentos/minhas');
+  const area = document.getElementById('conteudo-aba');
+  if (!agendamentos.length) return area.innerHTML = '<p class="vazio">Nenhum agendamento solicitado. <a href="/agendar.html" style="color:var(--verde);font-weight:700;">Agendar agora</a></p>';
+  area.innerHTML = agendamentos.map(a => `
+    <div class="card">
+      <div class="flex entre">
+        <strong>${escapeHtml(a.servico_nome)}</strong>
+        <span class="chip ${a.status}">${a.status}</span>
+      </div>
+      <p style="font-size:.85rem;color:var(--texto-suave);">${formatarData(a.data_servico)} às ${a.horario} — ${escapeHtml(a.local)}</p>
+      ${a.motivo_recusa ? `<p style="font-size:.85rem;color:var(--vermelho);">Motivo: ${escapeHtml(a.motivo_recusa)}</p>` : ''}
+    </div>
+  `).join('');
+}
+
+const ABAS = { pedidos: abaPedidos, interesses: abaInteresses, agendamentos: abaAgendamentos };
+document.querySelectorAll('[data-aba]').forEach(btn => btn.addEventListener('click', () => ABAS[btn.dataset.aba]()));
+
+exigirLogin().then(abaPedidos).catch(() => {});
+</script>
+</body>
+</html>

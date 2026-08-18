@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel Superadmin — Estância Salvarte</title>
+<link rel="icon" href="/img/favicon.png">
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  .barra-linha { display: grid; grid-template-columns: 200px 1fr 90px; align-items: center; gap: .6rem; margin-bottom: .5rem; font-size: .85rem; }
+  .barra-fundo { background: var(--creme-escuro); border-radius: 20px; height: 16px; overflow: hidden; }
+  .barra-preenchida { background: var(--verde); height: 100%; border-radius: 20px; }
+  .barra-preenchida.dourada { background: var(--dourado); }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+<div class="painel-shell">
+  <nav class="painel-sidebar">
+    <a href="#" data-secao="relatorios" class="ativo">📊 Relatórios</a>
+    <a href="#" data-secao="produtos">📦 Produtos</a>
+    <a href="#" data-secao="categorias">🗂️ Categorias</a>
+    <a href="#" data-secao="pedidos">🧾 Pedidos</a>
+    <a href="#" data-secao="cupons">🎟️ Cupons</a>
+    <a href="#" data-secao="agendamentos">📅 Agendamentos</a>
+    <a href="#" data-secao="encomendas">🔔 Encomendas / avisos de estoque</a>
+    <a href="#" data-secao="usuarios">👤 Usuários</a>
+    <a href="#" data-secao="site">⚙️ Site</a>
+  </nav>
+  <main class="painel-main">
+    <div class="painel-topo"><h2 id="titulo-secao">Relatórios</h2></div>
+    <div id="conteudo-secao"><p class="vazio">Carregando...</p></div>
+  </main>
+</div>
+<div id="app-footer"></div>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>var NAO_AUTOINICIAR = true;</script>
+<script src="/js/admin.js"></script>
+<script src="/js/superadmin.js"></script>
+</body>
+</html>

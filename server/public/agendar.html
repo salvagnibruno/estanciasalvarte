@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agendar serviço — Estância Salvarte</title>
+<link rel="icon" href="/img/favicon.png">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app-header"></div>
+<section class="container mt-2">
+  <div class="section-title">
+    <h2>Agendar um serviço</h2>
+    <p>Confecção sob medida, ajustes e atendimento personalizado. Envie sua solicitação e aguarde a confirmação.</p>
+  </div>
+  <div class="form-card">
+    <label>Serviço desejado</label>
+    <input id="a-servico" placeholder="Ex.: Ajuste de bombacha, confecção sob medida...">
+    <div class="linha-dupla">
+      <div><label>Data desejada</label><input id="a-data" type="date"></div>
+      <div><label>Horário</label><input id="a-horario" type="time"></div>
+    </div>
+    <label>Local (loja, oficina, endereço do cliente...)</label>
+    <input id="a-local">
+    <div class="linha-dupla">
+      <div><label>Responsável pela contratação</label><input id="a-responsavel"></div>
+      <div><label>Telefone para contato</label><input id="a-telefone"></div>
+    </div>
+    <label>Observações</label>
+    <textarea id="a-obs" placeholder="Detalhes do serviço, medidas, referências..."></textarea>
+
+    <button class="btn mt-2" id="btn-agendar" style="width:100%;">Enviar solicitação</button>
+    <p id="msg-agenda" class="msg" style="display:none;"></p>
+  </div>
+</section>
+<div id="app-footer"></div>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+document.getElementById('btn-agendar').addEventListener('click', async () => {
+  const msg = document.getElementById('msg-agenda');
+  try {
+    const resp = await Api.post('/api/agendamentos', {
+      servico_nome: document.getElementById('a-servico').value,
+      data_servico: document.getElementById('a-data').value,
+      horario: document.getElementById('a-horario').value,
+      local: document.getElementById('a-local').value,
+      responsavel: document.getElementById('a-responsavel').value,
+      telefone_contato: document.getElementById('a-telefone').value,
+      observacoes: document.getElementById('a-obs').value
+    });
+    msg.textContent = resp.mensagem; msg.className = 'msg sucesso'; msg.style.display = 'block';
+  } catch (e) {
+    msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block';
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finalizar compra — Estância Salvarte</title>
+<link rel="icon" href="/img/favicon.png">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app-header"></div>
+<section class="container mt-2">
+  <h2 class="text-center">Finalizar compra</h2>
+  <div class="form-card">
+    <div id="resumo-itens" style="font-size:.88rem;color:var(--texto-suave);margin-bottom:1rem;"></div>
+    <label>Nome completo</label>
+    <input id="c-nome">
+    <div class="linha-dupla">
+      <div><label>Telefone / WhatsApp</label><input id="c-telefone" placeholder="(55) 9xxxx-xxxx"></div>
+      <div><label>E-mail</label><input id="c-email" type="email"></div>
+    </div>
+    <label>CPF</label>
+    <input id="c-cpf" placeholder="000.000.000-00">
+    <p style="font-size:.78rem;color:var(--texto-suave);margin:-.4rem 0 .6rem;">
+      E-mail e CPF são necessários para a emissão da nota fiscal do pedido.
+    </p>
+
+    <h3 style="margin:.8rem 0 .2rem;font-size:1rem;">Endereço residencial</h3>
+    <div class="linha-dupla">
+      <div><label>CEP</label><input id="r-cep" placeholder="00000-000"></div>
+      <div><label>Número</label><input id="r-numero"></div>
+    </div>
+    <label>Logradouro (rua/avenida)</label><input id="r-logradouro">
+    <label>Complemento (opcional)</label><input id="r-complemento">
+    <div class="linha-dupla">
+      <div><label>Bairro</label><input id="r-bairro"></div>
+      <div><label>Cidade</label><input id="r-cidade"></div>
+    </div>
+    <label>Estado (UF)</label>
+    <select id="r-uf"></select>
+
+    <label style="margin-top:.8rem;display:block;">
+      <input type="checkbox" id="c-entrega-igual" checked> Entregar neste mesmo endereço
+    </label>
+
+    <div id="bloco-endereco-entrega" style="display:none;">
+      <h3 style="margin:.8rem 0 .2rem;font-size:1rem;">Endereço de entrega</h3>
+      <div class="linha-dupla">
+        <div><label>CEP</label><input id="e-cep" placeholder="00000-000"></div>
+        <div><label>Número</label><input id="e-numero"></div>
+      </div>
+      <label>Logradouro (rua/avenida)</label><input id="e-logradouro">
+      <label>Complemento (opcional)</label><input id="e-complemento">
+      <div class="linha-dupla">
+        <div><label>Bairro</label><input id="e-bairro"></div>
+        <div><label>Cidade</label><input id="e-cidade"></div>
+      </div>
+      <label>Estado (UF)</label>
+      <select id="e-uf"></select>
+    </div>
+
+    <label style="margin-top:.8rem;">Cupom de desconto (opcional)</label>
+    <div class="flex">
+      <input id="c-cupom" placeholder="Digite o código do cupom" style="text-transform:uppercase;">
+      <button class="btn pequeno secundario" id="btn-cupom" style="border-color:var(--couro);color:var(--couro);white-space:nowrap;">Aplicar</button>
+    </div>
+    <p id="msg-cupom" style="font-size:.84rem;margin:.4rem 0 0;display:none;"></p>
+
+    <label>Forma de pagamento</label>
+    <select id="c-pagamento">
+      <option value="cartao_credito">Cartão de crédito (Mercado Pago)</option>
+      <option value="cartao_debito">Cartão de débito (Mercado Pago)</option>
+      <option value="pix">Pix (Mercado Pago)</option>
+      <option value="combinar">Combinar diretamente com a loja</option>
+    </select>
+
+    <button class="btn mt-2" id="btn-finalizar" style="width:100%;">Confirmar pedido</button>
+    <p id="msg-checkout" class="msg" style="display:none;"></p>
+  </div>
+</section>
+<div id="app-footer"></div>
+<script src="/js/api.js"></script>
+<script src="/js/layout.js"></script>
+<script>
+// Guarda o total do carrinho e o cupom validado para montar o resumo.
+const compra = { total: 0, itens: [], cupom: null, desconto: 0 };
+
+const UFS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+function preencherSelectsUf() {
+  const opcoes = '<option value="">UF</option>' + UFS.map(uf => `<option value="${uf}">${uf}</option>`).join('');
+  document.getElementById('r-uf').innerHTML = opcoes;
+  document.getElementById('e-uf').innerHTML = opcoes;
+}
+
+function lerEndereco(prefixo) {
+  return {
+    cep: document.getElementById(`${prefixo}-cep`).value,
+    logradouro: document.getElementById(`${prefixo}-logradouro`).value,
+    numero: document.getElementById(`${prefixo}-numero`).value,
+    complemento: document.getElementById(`${prefixo}-complemento`).value,
+    bairro: document.getElementById(`${prefixo}-bairro`).value,
+    cidade: document.getElementById(`${prefixo}-cidade`).value,
+    uf: document.getElementById(`${prefixo}-uf`).value
+  };
+}
+
+function preencherEndereco(prefixo, endereco) {
+  if (!endereco) return;
+  document.getElementById(`${prefixo}-cep`).value = endereco.cep || '';
+  document.getElementById(`${prefixo}-logradouro`).value = endereco.logradouro || '';
+  document.getElementById(`${prefixo}-numero`).value = endereco.numero || '';
+  document.getElementById(`${prefixo}-complemento`).value = endereco.complemento || '';
+  document.getElementById(`${prefixo}-bairro`).value = endereco.bairro || '';
+  document.getElementById(`${prefixo}-cidade`).value = endereco.cidade || '';
+  document.getElementById(`${prefixo}-uf`).value = endereco.uf || '';
+}
+
+document.getElementById('c-entrega-igual').addEventListener('change', (e) => {
+  document.getElementById('bloco-endereco-entrega').style.display = e.target.checked ? 'none' : 'block';
+});
+
+function desenharResumo() {
+  const linhas = compra.itens
+    .map(i => `${i.quantidade}x ${escapeHtml(i.produto_nome)} — ${formatarMoeda(i.preco_unitario * i.quantidade)}`)
+    .join('<br>');
+
+  const final = Math.round((compra.total - compra.desconto) * 100) / 100;
+  const blocoDesconto = compra.desconto > 0
+    ? `<br>Subtotal: ${formatarMoeda(compra.total)}
+       <br>Desconto (${escapeHtml(compra.cupom)}): − ${formatarMoeda(compra.desconto)}`
+    : '';
+
+  document.getElementById('resumo-itens').innerHTML = `
+    ${linhas}${blocoDesconto}
+    <hr><strong>Total: ${formatarMoeda(final)}</strong>
+  `;
+}
+
+async function preencherResumo() {
+  preencherSelectsUf();
+
+  const carrinho = await Api.get('/api/carrinho');
+  if (!carrinho.itens.length) {
+    window.location.href = '/carrinho.html';
+    return;
+  }
+  compra.itens = carrinho.itens;
+  compra.total = carrinho.total;
+  desenharResumo();
+
+  const usuario = await Api.get('/api/auth/me');
+  if (usuario) {
+    document.getElementById('c-nome').value = usuario.nome;
+    document.getElementById('c-email').value = usuario.email || '';
+    document.getElementById('c-telefone').value = usuario.telefone || '';
+
+    // Cliente que já comprou antes: reaproveita CPF/endereço do pedido mais
+    // recente para não digitar tudo de novo.
+    try {
+      const pedidos = await Api.get('/api/pedidos/meus-pedidos');
+      const ultimo = pedidos[0];
+      if (ultimo) {
+        if (ultimo.cpf_cliente) document.getElementById('c-cpf').value = ultimo.cpf_cliente;
+        if (ultimo.endereco_resid_logradouro) {
+          preencherEndereco('r', {
+            cep: ultimo.endereco_resid_cep, logradouro: ultimo.endereco_resid_logradouro,
+            numero: ultimo.endereco_resid_numero, complemento: ultimo.endereco_resid_complemento,
+            bairro: ultimo.endereco_resid_bairro, cidade: ultimo.endereco_resid_cidade, uf: ultimo.endereco_resid_uf
+          });
+        }
+      }
+    } catch (e) { /* sem pedidos anteriores: segue com o formulário em branco */ }
+  }
+}
+
+document.getElementById('btn-cupom').addEventListener('click', async () => {
+  const msg = document.getElementById('msg-cupom');
+  const codigo = document.getElementById('c-cupom').value.trim();
+  msg.style.display = 'block';
+
+  if (!codigo) {
+    compra.cupom = null; compra.desconto = 0;
+    msg.textContent = 'Cupom removido.'; msg.style.color = 'var(--texto-suave)';
+    desenharResumo();
+    return;
+  }
+
+  try {
+    const resultado = await Api.get(`/api/cupons/validar?codigo=${encodeURIComponent(codigo)}`);
+    if (resultado.valido) {
+      compra.cupom = resultado.codigo;
+      compra.desconto = resultado.desconto;
+      msg.textContent = `Cupom ${resultado.codigo} aplicado: − ${formatarMoeda(resultado.desconto)}`;
+      msg.style.color = 'var(--verde)';
+    } else {
+      compra.cupom = null; compra.desconto = 0;
+      msg.textContent = resultado.motivo; msg.style.color = 'var(--vermelho)';
+    }
+  } catch (e) {
+    compra.cupom = null; compra.desconto = 0;
+    msg.textContent = e.message; msg.style.color = 'var(--vermelho)';
+  }
+  desenharResumo();
+});
+
+document.getElementById('btn-finalizar').addEventListener('click', async () => {
+  const msg = document.getElementById('msg-checkout');
+  const entregaIgual = document.getElementById('c-entrega-igual').checked;
+  try {
+    const resposta = await Api.post('/api/pedidos/checkout', {
+      nome_cliente: document.getElementById('c-nome').value,
+      telefone_cliente: document.getElementById('c-telefone').value,
+      email_cliente: document.getElementById('c-email').value,
+      cpf_cliente: document.getElementById('c-cpf').value,
+      endereco_residencial: lerEndereco('r'),
+      entrega_igual_residencial: entregaIgual,
+      endereco_entrega: entregaIgual ? null : lerEndereco('e'),
+      forma_pagamento: document.getElementById('c-pagamento').value,
+      cupom: compra.cupom
+    });
+    if (resposta.checkout_url) {
+      window.location.href = resposta.checkout_url;
+    } else {
+      window.location.href = '/pedido-confirmado.html?pedido=' + resposta.pedido_id + (resposta.aviso ? '&aviso=' + encodeURIComponent(resposta.aviso) : '');
+    }
+  } catch (e) {
+    msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block';
+  }
+});
+
+preencherResumo();
+</script>
+</body>
+</html>
