@@ -25,16 +25,23 @@ async function importarBancoDoRepoSeVazio() {
   const bancoDoRepo = path.join(__dirname, 'estancia.db');
   if (!fs.existsSync(bancoDoRepo)) return;
 
-  const existeTabela = await client.execute(`SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'`);
-  if (existeTabela.rows.length) return; // banco remoto já tem dados: não mexe
+  // schema.sql já rodou (a tabela existe, mesmo vazia) — o que importa aqui é
+  // se já HÁ linhas nela, não se ela existe.
+  const jaTemUsuario = await client.execute(`SELECT COUNT(*) AS n FROM usuarios`);
+  if (Number(jaTemUsuario.rows[0].n) > 0) return; // banco remoto já tem dados: não mexe
 
+  // A estrutura (tabelas/índices) já existe no Turso — veio do próprio
+  // schema.sql, executado logo acima. Só falta copiar as linhas. Só de tabelas
+  // que existem nos dois lados: o arquivo local pode ter sobras de versões
+  // antigas (ex.: a tabela "sessions", de quando a sessão ainda vinha do
+  // banco) que não fazem parte do schema atual.
   const Database = require('better-sqlite3');
   const local = new Database(bancoDoRepo, { readonly: true });
-  const tabelas = local.prepare(`SELECT name, sql FROM sqlite_master WHERE type IN ('table','index') AND sql IS NOT NULL AND name NOT LIKE 'sqlite_%'`).all();
-  for (const t of tabelas) {
-    await client.execute(t.sql);
-  }
-  const dadosTabelas = local.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`).all();
+  const tabelasRemotas = new Set((await client.execute(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`
+  )).rows.map(r => r.name));
+  const dadosTabelas = local.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
+    .all().filter(t => tabelasRemotas.has(t.name));
   for (const { name } of dadosTabelas) {
     const linhas = local.prepare(`SELECT * FROM ${name}`).all();
     for (const linha of linhas) {
@@ -44,7 +51,7 @@ async function importarBancoDoRepoSeVazio() {
     }
   }
   local.close();
-  console.log(`[setup] Banco importado do repositório para o Turso (${tabelas.length} tabela/índice, ${dadosTabelas.length} tabela(s) com dados).`);
+  console.log(`[setup] Banco importado do repositório para o Turso (${dadosTabelas.length} tabela(s) copiadas).`);
 }
 
 // ---------- Camada de compatibilidade com o formato do better-sqlite3 ----------
