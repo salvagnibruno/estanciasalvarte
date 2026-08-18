@@ -1,5 +1,6 @@
 let USUARIO = null;
 let CATEGORIAS_CACHE = [];
+let LINHAS_CACHE = [];
 let PRODUTO_EM_EDICAO = null;
 // Produtos marcados na tabela para o reajuste de precos. Sobrevive a troca do
 // filtro de categoria de proposito: da' para marcar itens de categorias
@@ -16,6 +17,7 @@ async function iniciarPainel() {
     return;
   }
   CATEGORIAS_CACHE = await Api.get('/api/categorias');
+  LINHAS_CACHE = await Api.get('/api/linhas');
 
   // Itens do menu que dependem de permissao concedida pelo superadmin.
   document.querySelectorAll('[data-permissao]').forEach(item => {
@@ -211,6 +213,16 @@ async function abrirFormProduto(id) {
       <label>Cores — nome:hex separados por vírgula</label>
       <input id="pf-cores" value="${p ? p.cores.map(c => `${c.cor_nome}:${c.cor_hex}`).join(', ') : ''}" placeholder="preto:#111111, bege:#d2b48c">
       ${blocoFotosCoresHtml(p)}
+
+      <label>Linhas (nenhuma, uma, várias ou todas)</label>
+      <div class="grade-permissoes">
+        ${LINHAS_CACHE.map(l => `
+          <label class="permissao-item">
+            <input type="checkbox" data-pf-linha value="${l.id}" ${p && p.linhas.some(pl => pl.id === l.id) ? 'checked' : ''}>
+            <span>${escapeHtml(l.nome)}</span>
+          </label>
+        `).join('') || '<small style="color:var(--texto-suave);">Nenhuma linha cadastrada ainda — o superadmin cadastra em Linhas.</small>'}
+      </div>
 
       ${EH_SUPERADMIN() ? `
         <hr>
@@ -565,7 +577,8 @@ async function salvarProduto(id) {
     imagem_url: document.getElementById('pf-imagem').value,
     destaque: document.getElementById('pf-destaque').checked,
     tamanhos: parseTamanhos(),
-    cores: parseCores()
+    cores: parseCores(),
+    linhas_ids: [...document.querySelectorAll('[data-pf-linha]:checked')].map(c => parseInt(c.value, 10))
   };
   const botao = document.getElementById('pf-salvar');
   botao.disabled = true;
@@ -578,6 +591,7 @@ async function salvarProduto(id) {
       produtoId = resp.id;
     }
     await Api.put(`/api/gestao/produtos/${produtoId}/tamanhos-cores`, { tamanhos: corpo.tamanhos, cores: corpo.cores });
+    await Api.put(`/api/gestao/produtos/${produtoId}/linhas`, { linhas_ids: corpo.linhas_ids });
     // Custo, preco e promocao NAO passam pelo PUT acima: a rota de gestao ignora
     // esses campos de proposito (so o superadmin mexe em valor, por rotas
     // proprias). Antes disso, quem editava o preco e clicava em "Salvar" via a

@@ -7,6 +7,10 @@ function montarProduto(row, { incluirCusto } = { incluirCusto: false }) {
   // `imagem_url` da cor alimenta a troca de foto na pagina do produto.
   const cores = db.prepare('SELECT id, cor_nome, cor_hex, imagem_url FROM produto_cores WHERE produto_id = ? ORDER BY id').all(row.id);
   const estoque = db.prepare('SELECT tamanho, cor, quantidade FROM produto_estoque WHERE produto_id = ?').all(row.id);
+  const linhas = db.prepare(`
+    SELECT l.id, l.nome, l.slug FROM produto_linhas pl JOIN linhas l ON l.id = pl.linha_id
+    WHERE pl.produto_id = ? ORDER BY l.ordem ASC
+  `).all(row.id);
   const estoqueTotal = estoque.reduce((soma, e) => soma + e.quantidade, 0);
   // Promocao so vale se for um valor menor que o preco cheio.
   const promocional = row.preco_promocional && row.preco_promocional > 0 && row.preco_promocional < row.preco_venda
@@ -33,6 +37,7 @@ function montarProduto(row, { incluirCusto } = { incluirCusto: false }) {
     criado_em: row.criado_em, // a vitrine usa para marcar "novidade"
     tamanhos,
     cores,
+    linhas,
     estoque,
     estoque_total: estoqueTotal,
     disponivel: row.tipo_estoque === 'estoque' ? estoqueTotal > 0 : true
@@ -55,6 +60,18 @@ router.get('/categorias', (req, res) => {
   res.json(categorias);
 });
 
+// GET /api/linhas — usado pelo filtro do catálogo público e pelo cadastro de produto.
+router.get('/linhas', (req, res) => {
+  const linhas = db.prepare(`
+    SELECT l.*, (
+      SELECT COUNT(*) FROM produto_linhas pl JOIN produtos p ON p.id = pl.produto_id
+      WHERE pl.linha_id = l.id AND p.ativo = 1
+    ) AS total_produtos
+    FROM linhas l ORDER BY l.ordem ASC
+  `).all();
+  res.json(linhas);
+});
+
 // Preco que vale para o cliente (promocional quando houver).
 const PRECO_EFETIVO = `CASE WHEN p.preco_promocional > 0 AND p.preco_promocional < p.preco_venda
                             THEN p.preco_promocional ELSE p.preco_venda END`;
@@ -68,14 +85,18 @@ const ORDENACOES = {
   novidades: 'p.criado_em DESC, p.nome ASC'
 };
 
-// GET /api/produtos?categoria=slug&busca=termo&ordem=nome&destaque=1
+// GET /api/produtos?categoria=slug&linha=slug&busca=termo&ordem=nome&destaque=1
 router.get('/produtos', (req, res) => {
-  const { categoria, busca, destaque } = req.query;
+  const { categoria, linha, busca, destaque } = req.query;
   let sql = `SELECT p.*, c.nome AS categoria_nome, c.slug AS categoria_slug
              FROM produtos p JOIN categorias c ON c.id = p.categoria_id
              WHERE p.ativo = 1`;
   const params = [];
   if (categoria) { sql += ' AND c.slug = ?'; params.push(categoria); }
+  if (linha) {
+    sql += ` AND p.id IN (SELECT pl.produto_id FROM produto_linhas pl JOIN linhas l ON l.id = pl.linha_id WHERE l.slug = ?)`;
+    params.push(linha);
+  }
   if (busca) { sql += ' AND (p.nome LIKE ? OR p.descricao LIKE ?)'; params.push(`%${busca}%`, `%${busca}%`); }
   if (destaque === '1') sql += ' AND p.destaque = 1';
   sql += ' ORDER BY ' + (ORDENACOES[req.query.ordem] || ORDENACOES.nome);

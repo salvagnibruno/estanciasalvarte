@@ -47,6 +47,27 @@ CREATE TABLE IF NOT EXISTS produto_cores (
   imagem_url TEXT
 );
 
+-- Linhas: agrupamentos transversais de produto (ex.: "Infantil", "Linha Verão",
+-- "Calçados"), cadastradas pelo superadmin. Um produto pode estar em nenhuma,
+-- uma, várias ou todas as linhas ao mesmo tempo — por isso é tabela à parte
+-- (N:N), diferente de categorias (uma só por produto).
+CREATE TABLE IF NOT EXISTS linhas (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nome TEXT NOT NULL UNIQUE,
+  slug TEXT NOT NULL UNIQUE,
+  ordem INTEGER NOT NULL DEFAULT 0,
+  criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS produto_linhas (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  produto_id INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
+  linha_id INTEGER NOT NULL REFERENCES linhas(id) ON DELETE CASCADE,
+  UNIQUE(produto_id, linha_id)
+);
+CREATE INDEX IF NOT EXISTS idx_produto_linhas_produto ON produto_linhas(produto_id);
+CREATE INDEX IF NOT EXISTS idx_produto_linhas_linha ON produto_linhas(linha_id);
+
 CREATE TABLE IF NOT EXISTS produto_estoque (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   produto_id INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,

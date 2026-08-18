@@ -439,6 +439,69 @@ router.delete('/avisos/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- Linhas (agrupamento transversal — cadastro exclusivo do superadmin) ----------
+// A atribuição de linhas a um produto (nenhuma, uma, várias ou todas) acontece
+// no cadastro/edição de produto em routes/gestao.js — aqui só a taxonomia em si.
+function gerarSlugLinha(texto) {
+  return String(texto || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+router.get('/linhas', (req, res) => {
+  const linhas = db.prepare(`
+    SELECT l.*, (SELECT COUNT(*) FROM produto_linhas pl WHERE pl.linha_id = l.id) AS total_produtos
+    FROM linhas l ORDER BY l.ordem ASC
+  `).all();
+  res.json(linhas);
+});
+
+router.post('/linhas', (req, res) => {
+  const { nome, ordem } = req.body || {};
+  const nomeLimpo = String(nome || '').trim();
+  if (!nomeLimpo) return res.status(400).json({ erro: 'Informe o nome da linha.' });
+  const slug = gerarSlugLinha(nomeLimpo);
+  if (!slug) return res.status(400).json({ erro: 'O nome precisa ter ao menos uma letra ou número.' });
+
+  const existente = db.prepare('SELECT id FROM linhas WHERE nome = ? COLLATE NOCASE OR slug = ?').get(nomeLimpo, slug);
+  if (existente) return res.status(409).json({ erro: 'Já existe uma linha com esse nome.' });
+
+  const ordemInformada = parseInt(ordem, 10);
+  const ordemFinal = Number.isInteger(ordemInformada)
+    ? ordemInformada
+    : (db.prepare('SELECT COALESCE(MAX(ordem), 0) + 1 AS proxima FROM linhas').get().proxima);
+
+  const info = db.prepare('INSERT INTO linhas (nome, slug, ordem) VALUES (?, ?, ?)').run(nomeLimpo, slug, ordemFinal);
+  res.status(201).json({ id: info.lastInsertRowid, slug });
+});
+
+router.put('/linhas/:id', (req, res) => {
+  const linha = db.prepare('SELECT * FROM linhas WHERE id = ?').get(req.params.id);
+  if (!linha) return res.status(404).json({ erro: 'Linha não encontrada.' });
+
+  const { nome, ordem } = req.body || {};
+  const nomeLimpo = nome !== undefined ? String(nome).trim() : linha.nome;
+  if (!nomeLimpo) return res.status(400).json({ erro: 'Informe o nome da linha.' });
+  const slug = nome !== undefined ? gerarSlugLinha(nomeLimpo) : linha.slug;
+  if (!slug) return res.status(400).json({ erro: 'O nome precisa ter ao menos uma letra ou número.' });
+
+  const conflito = db.prepare('SELECT id FROM linhas WHERE (nome = ? COLLATE NOCASE OR slug = ?) AND id != ?').get(nomeLimpo, slug, linha.id);
+  if (conflito) return res.status(409).json({ erro: 'Já existe outra linha com esse nome.' });
+
+  const ordemInformada = parseInt(ordem, 10);
+  db.prepare('UPDATE linhas SET nome = ?, slug = ?, ordem = ? WHERE id = ?')
+    .run(nomeLimpo, slug, Number.isInteger(ordemInformada) ? ordemInformada : linha.ordem, linha.id);
+  res.json({ ok: true, slug });
+});
+
+router.delete('/linhas/:id', (req, res) => {
+  const info = db.prepare('DELETE FROM linhas WHERE id = ?').run(req.params.id);
+  if (!info.changes) return res.status(404).json({ erro: 'Linha não encontrada.' });
+  res.json({ ok: true });
+});
+
 // ---------- Relatorios ----------
 router.get('/relatorios/resumo', (req, res) => {
   const totalProdutos = db.prepare('SELECT COUNT(*) n FROM produtos WHERE ativo = 1').get().n;

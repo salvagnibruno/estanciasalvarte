@@ -61,6 +61,35 @@ const STATUS_ANTIGOS = {
   concluido: 'finalizado'
 };
 
+// Substitui o catálogo antigo (produtos/categorias de desenvolvimento) pela
+// lista definitiva de produtos da loja — uma única vez, marcado em
+// configuracoes.catalogo_versao. Pedidos já fechados não são apagados: o
+// produto_id do item vira NULL (o pedido guarda nome/preço/custo do momento
+// da compra à parte), exatamente como já acontece ao excluir um produto pelo
+// painel. Depois desta limpeza, db/seed.js roda e cadastra os produtos novos.
+const CATALOGO_VERSAO_ATUAL = 2;
+function resetarCatalogoAntigo(db) {
+  const row = db.prepare(`SELECT valor FROM configuracoes WHERE chave = 'catalogo_versao'`).get();
+  const versaoAtual = row ? parseInt(row.valor, 10) : 1;
+  if (versaoAtual >= CATALOGO_VERSAO_ATUAL) return false;
+
+  const limpar = db.transaction(() => {
+    db.prepare('UPDATE pedido_itens SET produto_id = NULL WHERE produto_id IS NOT NULL').run();
+    db.prepare('DELETE FROM eventos_analytics WHERE produto_id IS NOT NULL').run();
+    for (const tabela of ['produto_tamanhos', 'produto_cores', 'produto_estoque', 'cupom_produtos',
+      'produto_linhas', 'interesses', 'encomendas', 'carrinho_itens', 'historico_precos']) {
+      db.prepare(`DELETE FROM ${tabela}`).run();
+    }
+    db.prepare('DELETE FROM produtos').run();
+    db.prepare('DELETE FROM linhas').run();
+    db.prepare('DELETE FROM categorias').run();
+    db.prepare(`INSERT INTO configuracoes (chave, valor) VALUES ('catalogo_versao', ?)
+      ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`).run(String(CATALOGO_VERSAO_ATUAL));
+  });
+  limpar();
+  return true;
+}
+
 function migrar(db) {
   const mudancas = [];
 
@@ -180,6 +209,9 @@ function migrar(db) {
   if (adicionarColuna(db, 'pedidos', 'endereco_entrega_bairro', 'TEXT')) mudancas.push('pedidos.endereco_entrega_bairro');
   if (adicionarColuna(db, 'pedidos', 'endereco_entrega_cidade', 'TEXT')) mudancas.push('pedidos.endereco_entrega_cidade');
   if (adicionarColuna(db, 'pedidos', 'endereco_entrega_uf', 'TEXT')) mudancas.push('pedidos.endereco_entrega_uf');
+
+  // ---------- catalogo: troca de linha de produtos (uma vez so) ----------
+  if (resetarCatalogoAntigo(db)) mudancas.push('catálogo antigo substituído pela nova lista de produtos');
 
   // ---------- funil por produto: marca de corte, sem apagar historico ----------
   // "Zerar" o funil (visualizacoes -> carrinho -> venda) sem excluir pedidos ou

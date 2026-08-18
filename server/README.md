@@ -73,6 +73,18 @@ UF). O endereço de entrega é o mesmo do residencial por padrão — o cliente 
 se marcar que a entrega é em outro lugar. Tudo isso fica gravado no pedido (visível no painel, seção
 "Pedidos") para emissão da nota fiscal.
 
+## Catálogo: categorias e linhas
+
+Cada produto tem uma **categoria** só (Bombachas Masculinas, Bombachas Femininas, Alpargatas, Botas,
+Casacos e Coletes, Camisetas e Polos — usada na navegação principal e no catálogo em PDF) e pode estar em
+**nenhuma, uma, várias ou todas as linhas** cadastradas (Infantil, Adulto Geral, Masculino, Feminino,
+Calçados, Bombachas Masculinas, Bombachas Femininas, Alpargatas, Botas, Linha Inverno, Linha Verão). As
+linhas são a forma de um produto aparecer em mais de um filtro ao mesmo tempo (ex.: uma bombacha infantil
+masculina entra em "Infantil", "Masculino" e "Bombachas Masculinas" simultaneamente).
+
+Cadastro de linhas (criar/editar/excluir) é exclusivo do **superadmin** (painel > Linhas). A atribuição de
+linhas a um produto específico acontece no cadastro/edição do produto (admin ou superadmin).
+
 ## Cupons
 
 Cadastro exclusivo do **superadmin** (painel > Cupons). Cada cupom tem:

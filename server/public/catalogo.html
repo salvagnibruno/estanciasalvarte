@@ -17,6 +17,7 @@
   </div>
   <div class="filtros">
     <select id="filtro-categoria"><option value="">Todas as categorias</option></select>
+    <select id="filtro-linha"><option value="">Todas as linhas</option></select>
     <input type="search" id="filtro-busca" placeholder="Buscar produto pelo nome...">
   </div>
   <div class="produtos-grid" id="grid-produtos"><p class="vazio">Carregando...</p></div>
@@ -27,9 +28,8 @@
 <script src="/js/layout.js"></script>
 <script>
 const EMOJI_CATEGORIA = {
-  'bombachas-femininas': '👖', 'bombachas-masculinas': '🤠', 'calcas-cargo': '🧥', 'saias': '👗', 'linha-infantil': '🧒',
-  'linha-verao': '👕', 'linha-inverno': '🧣', 'linha-uniformes': '👔', 'alpargatas': '🥿',
-  'botas': '🥾', 'erva-mate-bebidas': '🧉', 'servicos': '🧵'
+  'bombachas-masculinas': '🤠', 'bombachas-femininas': '👖', 'alpargatas': '🥿',
+  'botas': '🥾', 'casacos-coletes': '🧥', 'camisetas-polos': '👕'
 };
 const params = new URLSearchParams(window.location.search);
 
@@ -58,25 +58,35 @@ async function carregarFiltroCategorias() {
   if (params.get('categoria')) select.value = params.get('categoria');
 }
 
+async function carregarFiltroLinhas() {
+  const linhas = await Api.get('/api/linhas');
+  const select = document.getElementById('filtro-linha');
+  select.innerHTML += linhas.map(l => `<option value="${l.slug}">${escapeHtml(l.nome)}</option>`).join('');
+  if (params.get('linha')) select.value = params.get('linha');
+}
+
 async function carregarProdutos() {
   const grid = document.getElementById('grid-produtos');
   const categoria = document.getElementById('filtro-categoria').value;
+  const linha = document.getElementById('filtro-linha').value;
   const busca = document.getElementById('filtro-busca').value.trim();
   const query = new URLSearchParams();
   if (categoria) query.set('categoria', categoria);
+  if (linha) query.set('linha', linha);
   if (busca) query.set('busca', busca);
   const produtos = await Api.get('/api/produtos?' + query.toString());
   grid.innerHTML = produtos.map(cardProdutoHtml).join('') || '<p class="vazio">Nenhum produto encontrado.</p>';
 }
 
 document.getElementById('filtro-categoria').addEventListener('change', carregarProdutos);
+document.getElementById('filtro-linha').addEventListener('change', carregarProdutos);
 let debounce;
 document.getElementById('filtro-busca').addEventListener('input', () => {
   clearTimeout(debounce);
   debounce = setTimeout(carregarProdutos, 300);
 });
 
-carregarFiltroCategorias().then(carregarProdutos);
+Promise.all([carregarFiltroCategorias(), carregarFiltroLinhas()]).then(carregarProdutos);
 </script>
 </body>
 </html>

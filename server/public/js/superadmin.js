@@ -2,6 +2,7 @@ SECOES.usuarios = secaoUsuarios;
 SECOES.relatorios = secaoRelatorios;
 SECOES.cupons = secaoCupons;
 SECOES.site = secaoSite;
+SECOES.linhas = secaoLinhas;
 
 // Permissoes que podem ser concedidas — vem de server/permissoes.js.
 let PERMISSOES_DISPONIVEIS = [];
@@ -474,6 +475,79 @@ async function secaoSite(avisoEmEdicao) {
     if (!confirm('Excluir este aviso? Não é possível desfazer.')) return;
     await Api.del(`/api/superadmin/avisos/${b.dataset.avisoExcluir}`);
     secaoSite();
+  }));
+}
+
+// ==================== LINHAS ====================
+// Taxonomia transversal de produtos (Infantil, Linha Verão, Calçados etc.) —
+// cadastro exclusivo do superadmin. A atribuição a cada produto acontece no
+// formulário de produto (admin.js), que lista as linhas cadastradas aqui.
+function formularioLinhaHtml(linha) {
+  const l = linha || { nome: '', ordem: '' };
+  return `
+    <input type="hidden" id="ln-id" value="${l.id || ''}">
+    <div class="linha-dupla">
+      <div><label>Nome</label><input id="ln-nome" placeholder="Linha Inverno" value="${escapeHtml(l.nome)}"></div>
+      <div><label>Ordem de exibição</label><input id="ln-ordem" type="number" step="1" value="${l.ordem}"></div>
+    </div>
+    <button class="btn mt-1" id="ln-salvar">${l.id ? 'Salvar alterações' : 'Criar linha'}</button>
+    ${l.id ? '<button class="btn pequeno secundario" id="ln-cancelar-edicao" style="margin-left:.5rem;">Cancelar edição</button>' : ''}
+    <p id="ln-msg" class="msg" style="display:none;"></p>
+  `;
+}
+
+async function secaoLinhas(linhaEmEdicao) {
+  const linhas = await Api.get('/api/superadmin/linhas');
+
+  document.getElementById('conteudo-secao').innerHTML = `
+    <div class="card">
+      <h3>${linhaEmEdicao ? 'Editar linha' : 'Nova linha'}</h3>
+      ${formularioLinhaHtml(linhaEmEdicao)}
+    </div>
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Ordem</th><th>Nome</th><th>Produtos</th><th>Ações</th></tr></thead>
+      <tbody>${linhas.map(l => `
+        <tr>
+          <td>${l.ordem}</td>
+          <td><strong>${escapeHtml(l.nome)}</strong></td>
+          <td>${l.total_produtos ?? '-'}</td>
+          <td>
+            <button class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" data-linha-editar="${l.id}">Editar</button>
+            <button class="btn pequeno secundario" style="border-color:var(--vermelho);color:var(--vermelho);" data-linha-excluir="${l.id}">Excluir</button>
+          </td>
+        </tr>
+      `).join('') || '<tr><td colspan="4">Nenhuma linha cadastrada.</td></tr>'}</tbody>
+    </table></div>
+  `;
+
+  document.getElementById('ln-salvar').addEventListener('click', async () => {
+    const msg = document.getElementById('ln-msg');
+    const id = document.getElementById('ln-id').value;
+    const corpo = {
+      nome: document.getElementById('ln-nome').value,
+      ordem: document.getElementById('ln-ordem').value
+    };
+    try {
+      if (id) await Api.put(`/api/superadmin/linhas/${id}`, corpo);
+      else await Api.post('/api/superadmin/linhas', corpo);
+      secaoLinhas();
+    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block'; }
+  });
+
+  const btnCancelar = document.getElementById('ln-cancelar-edicao');
+  if (btnCancelar) btnCancelar.addEventListener('click', () => secaoLinhas());
+
+  document.querySelectorAll('[data-linha-editar]').forEach(b => b.addEventListener('click', () => {
+    const linha = linhas.find(l => l.id === parseInt(b.dataset.linhaEditar, 10));
+    secaoLinhas(linha);
+  }));
+
+  document.querySelectorAll('[data-linha-excluir]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Excluir esta linha? Ela sai de todos os produtos que a usam.')) return;
+    try {
+      await Api.del(`/api/superadmin/linhas/${b.dataset.linhaExcluir}`);
+      secaoLinhas();
+    } catch (e) { alert(e.message); }
   }));
 }
 

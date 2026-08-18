@@ -3,11 +3,11 @@ node_modules/
 # Segredos reais (use server/.env.example como modelo)
 .env
 
-# Banco de dados local (contém pedidos, clientes, etc. reais do ambiente onde
-# roda). Ao publicar em um novo servidor, copie server/db/estancia.db na mão
-# para lá — não perde nada do catálogo/preços, que também são recriados pelo
-# seed automaticamente numa base vazia. Ver server/README.md.
-server/db/estancia.db
+# server/db/estancia.db é versionado de propósito (a pedido do lojista): assim
+# o repositório carrega o catálogo/preços/pedidos reais e uma hospedagem nova
+# já sobe com os dados atuais. Os arquivos auxiliares do modo WAL (-shm/-wal)
+# ficam fora — são estado temporário, sempre recriado pelo SQLite ao abrir
+# o banco; o que importa já foi consolidado no .db antes do commit.
 server/db/estancia.db-shm
 server/db/estancia.db-wal
 

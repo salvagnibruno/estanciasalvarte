@@ -19,13 +19,10 @@ if (mudancas.length) console.log(`[migracao] ${mudancas.join(' | ')}`);
 
 const seedResult = seed(db);
 if (!seedResult.skipped) {
-  console.log(`[seed] ${seedResult.categorias} categorias e ${seedResult.total} produtos cadastrados.`);
+  console.log(`[seed] ${seedResult.categorias} categorias, ${seedResult.linhas} linhas e ${seedResult.total} produtos cadastrados.`);
 }
-
-// Linha masculina e fotos vindas do catalogo do fornecedor (Bombachas Pampeiro).
-const { aplicar: aplicarPampeiro } = require('./catalogo_pampeiro');
-const mudancasPampeiro = aplicarPampeiro(db);
-if (mudancasPampeiro.length) console.log(`[pampeiro] ${mudancasPampeiro.join(' | ')}`);
+// Nota: db/catalogo_pampeiro.js (linha masculina do catálogo do fornecedor)
+// foi incorporado ao próprio db/seed.js na revisão do catálogo — não roda mais.
 
 // Garante o usuario superadmin do dono da loja.
 const SUPERADMIN_EMAIL = 'bruno.salvagni@gmail.com';

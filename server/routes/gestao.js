@@ -172,7 +172,7 @@ function publicoValido(valor) {
 }
 
 router.post('/produtos', (req, res) => {
-  const { categoria_id, codigo, nome, descricao, tipo_estoque, imagem_url, tamanhos, cores, destaque, publico } = req.body || {};
+  const { categoria_id, codigo, nome, descricao, tipo_estoque, imagem_url, tamanhos, cores, destaque, publico, linhas_ids } = req.body || {};
   if (!categoria_id || !nome) return res.status(400).json({ erro: 'Categoria e nome são obrigatórios.' });
 
   const info = db.prepare(`INSERT INTO produtos
@@ -187,6 +187,9 @@ router.post('/produtos', (req, res) => {
   (tamanhos || []).forEach(t => insTamanho.run(produtoId, t));
   const insCor = db.prepare('INSERT INTO produto_cores (produto_id, cor_nome, cor_hex) VALUES (?, ?, ?)');
   (cores || []).forEach(c => insCor.run(produtoId, c.cor_nome || c.nome, c.cor_hex || c.hex || '#333333'));
+  const insLinha = db.prepare('INSERT INTO produto_linhas (produto_id, linha_id) VALUES (?, ?)');
+  (Array.isArray(linhas_ids) ? linhas_ids : []).map(n => parseInt(n, 10)).filter(Number.isInteger)
+    .forEach(linhaId => insLinha.run(produtoId, linhaId));
 
   res.status(201).json({ id: produtoId, aviso: !ehSuperadmin(req) ? 'Produto criado sem preço de venda. Peça ao superadmin para definir o custo e liberar o preço.' : undefined });
 });
@@ -254,6 +257,25 @@ router.put('/produtos/:id/tamanhos-cores', (req, res) => {
   });
   tx();
   res.json({ ok: true });
+});
+
+// Substitui o conjunto de linhas do produto pelo que veio no corpo (nenhuma,
+// uma, várias ou todas as linhas cadastradas).
+router.put('/produtos/:id/linhas', (req, res) => {
+  const produto = db.prepare('SELECT id FROM produtos WHERE id = ?').get(req.params.id);
+  if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
+
+  const linhasIds = [...new Set((Array.isArray((req.body || {}).linhas_ids) ? req.body.linhas_ids : [])
+    .map(n => parseInt(n, 10)).filter(Number.isInteger))];
+
+  const gravar = db.transaction(() => {
+    db.prepare('DELETE FROM produto_linhas WHERE produto_id = ?').run(produto.id);
+    const ins = db.prepare('INSERT INTO produto_linhas (produto_id, linha_id) VALUES (?, ?)');
+    linhasIds.forEach(linhaId => ins.run(produto.id, linhaId));
+  });
+  gravar();
+
+  res.json({ ok: true, linhas_ids: linhasIds });
 });
 
 // ---------- Foto do produto ----------
