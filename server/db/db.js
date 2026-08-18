@@ -6,6 +6,21 @@ const { seed } = require('./seed');
 const { migrar } = require('./migrate');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'estancia.db');
+
+// Em produção (DB_PATH aponta para um volume persistente fora do repositório),
+// a primeira subida encontra o volume vazio — copia o banco já versionado no
+// repo (com catálogo, preços e cadastros atuais) para lá, uma única vez. Nas
+// subidas seguintes o arquivo já existe no volume e não é mais tocado — o que
+// for gravado em produção depois disso nunca é sobrescrito por um deploy novo.
+if (process.env.DB_PATH && !fs.existsSync(DB_PATH)) {
+  const bancoDoRepo = path.join(__dirname, 'estancia.db');
+  if (fs.existsSync(bancoDoRepo)) {
+    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+    fs.copyFileSync(bancoDoRepo, DB_PATH);
+    console.log(`[setup] Banco copiado do repositório para o volume persistente (${DB_PATH}).`);
+  }
+}
+
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
