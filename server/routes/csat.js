@@ -15,19 +15,19 @@ function booleano(valor) {
 
 // GET /api/csat/pedido/:pedidoId — a pagina de confirmacao usa para nao
 // pedir a avaliacao duas vezes do mesmo pedido.
-router.get('/pedido/:pedidoId', (req, res) => {
-  const resposta = db.prepare('SELECT id, criado_em FROM csat WHERE pedido_id = ?').get(req.params.pedidoId);
+router.get('/pedido/:pedidoId', async (req, res) => {
+  const resposta = await db.prepare('SELECT id, criado_em FROM csat WHERE pedido_id = ?').get(req.params.pedidoId);
   res.json({ respondido: !!resposta, criado_em: resposta ? resposta.criado_em : null });
 });
 
 // POST /api/csat — grava a avaliacao vinculada ao pedido e ao cliente.
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { pedido_id, nota_precos, nota_site, nota_geral, primeira_compra, recomendaria, comentario } = req.body || {};
 
-  const pedido = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedido_id);
+  const pedido = await db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedido_id);
   if (!pedido) return res.status(404).json({ erro: 'Pedido não encontrado.' });
 
-  const jaRespondeu = db.prepare('SELECT id FROM csat WHERE pedido_id = ?').get(pedido.id);
+  const jaRespondeu = await db.prepare('SELECT id FROM csat WHERE pedido_id = ?').get(pedido.id);
   if (jaRespondeu) return res.status(409).json({ erro: 'Esta compra já foi avaliada. Obrigado!' });
 
   const notas = {
@@ -39,7 +39,7 @@ router.post('/', (req, res) => {
     return res.status(400).json({ erro: 'Responda as três notas (preços, site e experiência geral).' });
   }
 
-  const info = db.prepare(`INSERT INTO csat
+  const info = await db.prepare(`INSERT INTO csat
     (pedido_id, pedido_codigo, cliente_id, nome_cliente, email_cliente, telefone_cliente,
      nota_precos, nota_site, nota_geral, primeira_compra, recomendaria, comentario)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)

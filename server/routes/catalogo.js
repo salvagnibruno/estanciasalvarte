@@ -32,13 +32,13 @@ function logoEmbutida(caminhoPublico) {
 // GET /api/loja — contatos e identidade (usado pelo cabecalho e pelo catalogo).
 // Sem a logo embutida de proposito: o site inteiro chama esta rota e nao precisa
 // carregar a imagem em base64 a cada pagina.
-router.get('/loja', (req, res) => res.json(obterLoja()));
+router.get('/loja', async (req, res) => res.json(await obterLoja()));
 
 // GET /api/avisos/ativos — só os avisos dentro da janela de exibição, para o
 // banner do site (cadastro completo é exclusivo do superadmin).
-router.get('/avisos/ativos', (req, res) => {
+router.get('/avisos/ativos', async (req, res) => {
   const hoje = new Date().toISOString().slice(0, 10);
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT id, titulo, mensagem FROM avisos
     WHERE ativo = 1
       AND (data_inicio IS NULL OR data_inicio <= ?)
@@ -76,7 +76,7 @@ function rotuloPublico(publico, comUnissex) {
 //
 // Exportacao e' restrita: traz custo indireto do negocio (linha completa de
 // produtos e precos num arquivo unico), entao exige a permissao especifica.
-router.get('/catalogo', exigirPermissao('exportar_catalogo'), (req, res) => {
+router.get('/catalogo', exigirPermissao('exportar_catalogo'), async (req, res) => {
   // O catalogo carrega preco, estoque e a selecao de categorias do momento:
   // nada aqui pode vir do cache do navegador. Sem isto, gerar o PDF duas vezes
   // seguidas podia trazer a resposta anterior.
@@ -105,7 +105,7 @@ router.get('/catalogo', exigirPermissao('exportar_catalogo'), (req, res) => {
     params.push(publico);
   }
 
-  const linhas = db.prepare(`
+  const linhas = await db.prepare(`
     SELECT p.id, p.codigo, p.nome, p.descricao, p.preco_venda, p.preco_promocional,
            p.destaque, p.tipo_estoque, p.imagem_url,
            c.id AS categoria_id, c.nome AS categoria_nome, c.slug AS categoria_slug, c.ordem AS categoria_ordem
@@ -125,9 +125,9 @@ router.get('/catalogo', exigirPermissao('exportar_catalogo'), (req, res) => {
       });
     }
 
-    const tamanhos = db.prepare('SELECT tamanho FROM produto_tamanhos WHERE produto_id = ? ORDER BY id')
-      .all(linha.id).map(t => t.tamanho);
-    const cores = db.prepare('SELECT cor_nome, cor_hex FROM produto_cores WHERE produto_id = ? ORDER BY id')
+    const tamanhos = (await db.prepare('SELECT tamanho FROM produto_tamanhos WHERE produto_id = ? ORDER BY id')
+      .all(linha.id)).map(t => t.tamanho);
+    const cores = await db.prepare('SELECT cor_nome, cor_hex FROM produto_cores WHERE produto_id = ? ORDER BY id')
       .all(linha.id);
 
     const promocional = linha.preco_promocional && linha.preco_promocional > 0 && linha.preco_promocional < linha.preco_venda
@@ -154,7 +154,7 @@ router.get('/catalogo', exigirPermissao('exportar_catalogo'), (req, res) => {
   }
 
   const categorias = [...porCategoria.values()];
-  const loja = obterLoja();
+  const loja = await obterLoja();
   res.json({
     // `logo_embutida` e' o que a folha usa; `logo` fica como reserva caso a
     // leitura do arquivo tenha falhado na subida do servidor.

@@ -2,12 +2,12 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/db');
 
-function montarProduto(row, { incluirCusto } = { incluirCusto: false }) {
-  const tamanhos = db.prepare('SELECT tamanho FROM produto_tamanhos WHERE produto_id = ? ORDER BY id').all(row.id).map(r => r.tamanho);
+async function montarProduto(row, { incluirCusto } = { incluirCusto: false }) {
+  const tamanhos = (await db.prepare('SELECT tamanho FROM produto_tamanhos WHERE produto_id = ? ORDER BY id').all(row.id)).map(r => r.tamanho);
   // `imagem_url` da cor alimenta a troca de foto na pagina do produto.
-  const cores = db.prepare('SELECT id, cor_nome, cor_hex, imagem_url FROM produto_cores WHERE produto_id = ? ORDER BY id').all(row.id);
-  const estoque = db.prepare('SELECT tamanho, cor, quantidade FROM produto_estoque WHERE produto_id = ?').all(row.id);
-  const linhas = db.prepare(`
+  const cores = await db.prepare('SELECT id, cor_nome, cor_hex, imagem_url FROM produto_cores WHERE produto_id = ? ORDER BY id').all(row.id);
+  const estoque = await db.prepare('SELECT tamanho, cor, quantidade FROM produto_estoque WHERE produto_id = ?').all(row.id);
+  const linhas = await db.prepare(`
     SELECT l.id, l.nome, l.slug FROM produto_linhas pl JOIN linhas l ON l.id = pl.linha_id
     WHERE pl.produto_id = ? ORDER BY l.ordem ASC
   `).all(row.id);
@@ -52,8 +52,8 @@ function montarProduto(row, { incluirCusto } = { incluirCusto: false }) {
 }
 
 // GET /api/categorias
-router.get('/categorias', (req, res) => {
-  const categorias = db.prepare(`
+router.get('/categorias', async (req, res) => {
+  const categorias = await db.prepare(`
     SELECT c.*, (SELECT COUNT(*) FROM produtos p WHERE p.categoria_id = c.id AND p.ativo = 1) AS total_produtos
     FROM categorias c ORDER BY ordem ASC
   `).all();
@@ -61,8 +61,8 @@ router.get('/categorias', (req, res) => {
 });
 
 // GET /api/linhas — usado pelo filtro do catálogo público e pelo cadastro de produto.
-router.get('/linhas', (req, res) => {
-  const linhas = db.prepare(`
+router.get('/linhas', async (req, res) => {
+  const linhas = await db.prepare(`
     SELECT l.*, (
       SELECT COUNT(*) FROM produto_linhas pl JOIN produtos p ON p.id = pl.produto_id
       WHERE pl.linha_id = l.id AND p.ativo = 1
@@ -86,7 +86,7 @@ const ORDENACOES = {
 };
 
 // GET /api/produtos?categoria=slug&linha=slug&busca=termo&ordem=nome&destaque=1
-router.get('/produtos', (req, res) => {
+router.get('/produtos', async (req, res) => {
   const { categoria, linha, busca, destaque } = req.query;
   let sql = `SELECT p.*, c.nome AS categoria_nome, c.slug AS categoria_slug
              FROM produtos p JOIN categorias c ON c.id = p.categoria_id
@@ -101,23 +101,23 @@ router.get('/produtos', (req, res) => {
   if (destaque === '1') sql += ' AND p.destaque = 1';
   sql += ' ORDER BY ' + (ORDENACOES[req.query.ordem] || ORDENACOES.nome);
 
-  const rows = db.prepare(sql).all(...params);
-  res.json(rows.map(r => montarProduto(r)));
+  const rows = await db.prepare(sql).all(...params);
+  res.json(await Promise.all(rows.map(r => montarProduto(r))));
 });
 
 // GET /api/produtos/:id
-router.get('/produtos/:id', (req, res) => {
-  const row = db.prepare(`
+router.get('/produtos/:id', async (req, res) => {
+  const row = await db.prepare(`
     SELECT p.*, c.nome AS categoria_nome, c.slug AS categoria_slug
     FROM produtos p JOIN categorias c ON c.id = p.categoria_id
     WHERE p.id = ?
   `).get(req.params.id);
   if (!row) return res.status(404).json({ erro: 'Produto não encontrado.' });
 
-  db.prepare(`INSERT INTO eventos_analytics (tipo, produto_id, usuario_id, sessao_id) VALUES ('view_produto', ?, ?, ?)`)
-    .run(row.id, req.session.usuario ? req.session.usuario.id : null, req.sessionID);
+  await db.prepare(`INSERT INTO eventos_analytics (tipo, produto_id, usuario_id, sessao_id) VALUES ('view_produto', ?, ?, ?)`)
+    .run(row.id, req.session.usuario ? req.session.usuario.id : null, req.session.sid);
 
-  res.json(montarProduto(row));
+  res.json(await montarProduto(row));
 });
 
 module.exports = { router, montarProduto };

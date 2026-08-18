@@ -25,8 +25,8 @@ function gerarSlug(texto) {
 
 // Nome e slug sao UNIQUE no schema: sem esta conferencia o erro chegaria na tela
 // como falha 500 do SQLite, sem dizer o que estava repetido.
-function conflitoCategoria(nome, slug, idIgnorado) {
-  const outra = db.prepare(`SELECT nome, slug FROM categorias
+async function conflitoCategoria(nome, slug, idIgnorado) {
+  const outra = await db.prepare(`SELECT nome, slug FROM categorias
     WHERE (nome = ? COLLATE NOCASE OR slug = ?) AND id IS NOT ?`).get(nome, slug, idIgnorado);
   if (!outra) return null;
   return outra.slug === slug
@@ -34,7 +34,7 @@ function conflitoCategoria(nome, slug, idIgnorado) {
     : `Já existe uma categoria chamada "${outra.nome}".`;
 }
 
-function categoriasComTotais() {
+async function categoriasComTotais() {
   return db.prepare(`
     SELECT c.*,
            (SELECT COUNT(*) FROM produtos p WHERE p.categoria_id = c.id) AS total_produtos,
@@ -43,11 +43,11 @@ function categoriasComTotais() {
   `).all();
 }
 
-router.get('/categorias', (req, res) => {
-  res.json(categoriasComTotais());
+router.get('/categorias', async (req, res) => {
+  res.json(await categoriasComTotais());
 });
 
-router.post('/categorias', (req, res) => {
+router.post('/categorias', async (req, res) => {
   const { nome, slug, descricao, ordem } = req.body || {};
   const nomeLimpo = String(nome || '').trim();
   if (!nomeLimpo) return res.status(400).json({ erro: 'Informe o nome da categoria.' });
@@ -55,22 +55,22 @@ router.post('/categorias', (req, res) => {
   const slugLimpo = gerarSlug(slug || nomeLimpo);
   if (!slugLimpo) return res.status(400).json({ erro: 'O nome precisa ter ao menos uma letra ou número.' });
 
-  const conflito = conflitoCategoria(nomeLimpo, slugLimpo, null);
+  const conflito = await conflitoCategoria(nomeLimpo, slugLimpo, null);
   if (conflito) return res.status(400).json({ erro: conflito });
 
   // Sem ordem informada a categoria nova entra no fim da lista.
   const ordemInformada = parseInt(ordem, 10);
   const ordemFinal = Number.isInteger(ordemInformada)
     ? ordemInformada
-    : (db.prepare('SELECT COALESCE(MAX(ordem), 0) + 1 AS proxima FROM categorias').get().proxima);
+    : (await db.prepare('SELECT COALESCE(MAX(ordem), 0) + 1 AS proxima FROM categorias').get()).proxima;
 
-  const info = db.prepare('INSERT INTO categorias (nome, slug, descricao, ordem) VALUES (?, ?, ?, ?)')
+  const info = await db.prepare('INSERT INTO categorias (nome, slug, descricao, ordem) VALUES (?, ?, ?, ?)')
     .run(nomeLimpo, slugLimpo, descricao ? String(descricao).trim() : null, ordemFinal);
   res.status(201).json({ id: info.lastInsertRowid, slug: slugLimpo });
 });
 
-router.put('/categorias/:id', (req, res) => {
-  const categoria = db.prepare('SELECT * FROM categorias WHERE id = ?').get(req.params.id);
+router.put('/categorias/:id', async (req, res) => {
+  const categoria = await db.prepare('SELECT * FROM categorias WHERE id = ?').get(req.params.id);
   if (!categoria) return res.status(404).json({ erro: 'Categoria não encontrada.' });
 
   const { nome, slug, descricao, ordem } = req.body || {};
@@ -83,11 +83,11 @@ router.put('/categorias/:id', (req, res) => {
     : (nome !== undefined ? gerarSlug(nomeLimpo) : categoria.slug);
   if (!slugLimpo) return res.status(400).json({ erro: 'O nome precisa ter ao menos uma letra ou número.' });
 
-  const conflito = conflitoCategoria(nomeLimpo, slugLimpo, categoria.id);
+  const conflito = await conflitoCategoria(nomeLimpo, slugLimpo, categoria.id);
   if (conflito) return res.status(400).json({ erro: conflito });
 
   const ordemInformada = parseInt(ordem, 10);
-  db.prepare('UPDATE categorias SET nome = ?, slug = ?, descricao = ?, ordem = ? WHERE id = ?').run(
+  await db.prepare('UPDATE categorias SET nome = ?, slug = ?, descricao = ?, ordem = ? WHERE id = ?').run(
     nomeLimpo,
     slugLimpo,
     descricao !== undefined ? (String(descricao).trim() || null) : categoria.descricao,
@@ -101,13 +101,13 @@ router.put('/categorias/:id', (req, res) => {
 // produtos.categoria_id e' NOT NULL: nao existe produto sem categoria. Por isso
 // a exclusao de uma categoria com produtos so acontece junto com o destino para
 // onde eles vao — a tela pergunta antes, e a resposta 409 diz quantos sao.
-router.delete('/categorias/:id', (req, res) => {
-  const categoria = db.prepare('SELECT * FROM categorias WHERE id = ?').get(req.params.id);
+router.delete('/categorias/:id', async (req, res) => {
+  const categoria = await db.prepare('SELECT * FROM categorias WHERE id = ?').get(req.params.id);
   if (!categoria) return res.status(404).json({ erro: 'Categoria não encontrada.' });
 
-  const total = db.prepare('SELECT COUNT(*) AS total FROM produtos WHERE categoria_id = ?').get(categoria.id).total;
+  const total = (await db.prepare('SELECT COUNT(*) AS total FROM produtos WHERE categoria_id = ?').get(categoria.id)).total;
   if (!total) {
-    db.prepare('DELETE FROM categorias WHERE id = ?').run(categoria.id);
+    await db.prepare('DELETE FROM categorias WHERE id = ?').run(categoria.id);
     return res.json({ ok: true, movidos: 0 });
   }
 
@@ -121,36 +121,36 @@ router.delete('/categorias/:id', (req, res) => {
   if (destinoId === categoria.id) {
     return res.status(400).json({ erro: 'Escolha uma categoria diferente para receber os produtos.' });
   }
-  const destino = db.prepare('SELECT id, nome FROM categorias WHERE id = ?').get(destinoId);
+  const destino = await db.prepare('SELECT id, nome FROM categorias WHERE id = ?').get(destinoId);
   if (!destino) return res.status(400).json({ erro: 'A categoria de destino não existe mais.' });
 
-  const excluir = db.transaction(() => {
-    db.prepare(`UPDATE produtos SET categoria_id = ?, atualizado_em = datetime('now') WHERE categoria_id = ?`)
+  const excluir = db.transaction(async (tx) => {
+    await tx.prepare(`UPDATE produtos SET categoria_id = ?, atualizado_em = datetime('now') WHERE categoria_id = ?`)
       .run(destino.id, categoria.id);
-    db.prepare('DELETE FROM categorias WHERE id = ?').run(categoria.id);
+    await tx.prepare('DELETE FROM categorias WHERE id = ?').run(categoria.id);
   });
-  excluir();
+  await excluir();
 
   res.json({ ok: true, movidos: total, destino: destino.nome });
 });
 
 // ---------- Produtos ----------
-router.get('/produtos', (req, res) => {
-  const rows = db.prepare(`
+router.get('/produtos', async (req, res) => {
+  const rows = await db.prepare(`
     SELECT p.*, c.nome AS categoria_nome, c.slug AS categoria_slug
     FROM produtos p JOIN categorias c ON c.id = p.categoria_id
     ORDER BY p.nome ASC
   `).all();
-  res.json(rows.map(r => montarProduto(r, { incluirCusto: ehSuperadmin(req) })));
+  res.json(await Promise.all(rows.map(r => montarProduto(r, { incluirCusto: ehSuperadmin(req) }))));
 });
 
-router.get('/produtos/:id', (req, res) => {
-  const row = db.prepare(`
+router.get('/produtos/:id', async (req, res) => {
+  const row = await db.prepare(`
     SELECT p.*, c.nome AS categoria_nome, c.slug AS categoria_slug
     FROM produtos p JOIN categorias c ON c.id = p.categoria_id WHERE p.id = ?
   `).get(req.params.id);
   if (!row) return res.status(404).json({ erro: 'Produto não encontrado.' });
-  res.json(montarProduto(row, { incluirCusto: ehSuperadmin(req) }));
+  res.json(await montarProduto(row, { incluirCusto: ehSuperadmin(req) }));
 });
 
 // POST /produtos/publico-automatico
@@ -158,9 +158,9 @@ router.get('/produtos/:id', (req, res) => {
 // nome, depois categoria). A classificacao da migracao roda uma vez so, na
 // criacao da coluna; este botao existe para rodar de novo depois que as
 // descricoes forem revisadas.
-router.post('/produtos/publico-automatico', (req, res) => {
+router.post('/produtos/publico-automatico', async (req, res) => {
   const { reclassificarPublico } = require('../db/migrate');
-  const resumo = reclassificarPublico(db);
+  const resumo = await reclassificarPublico(db);
   res.json({ ok: true, ...resumo });
 });
 
@@ -171,11 +171,11 @@ function publicoValido(valor) {
   return PUBLICOS.includes(String(valor || '').toLowerCase()) ? String(valor).toLowerCase() : 'unissex';
 }
 
-router.post('/produtos', (req, res) => {
+router.post('/produtos', async (req, res) => {
   const { categoria_id, codigo, nome, descricao, tipo_estoque, imagem_url, tamanhos, cores, destaque, publico, linhas_ids } = req.body || {};
   if (!categoria_id || !nome) return res.status(400).json({ erro: 'Categoria e nome são obrigatórios.' });
 
-  const info = db.prepare(`INSERT INTO produtos
+  const info = await db.prepare(`INSERT INTO produtos
     (categoria_id, codigo, nome, descricao, custo, custo_fonte, percentual_markup, preco_venda, tipo_estoque, publico, imagem_url, destaque, ativo)
     VALUES (?, ?, ?, ?, 0, 'estimado', 0, 0, ?, ?, ?, ?, 1)`)
     .run(categoria_id, codigo || null, nome, descricao || null,
@@ -184,23 +184,23 @@ router.post('/produtos', (req, res) => {
   const produtoId = info.lastInsertRowid;
 
   const insTamanho = db.prepare('INSERT INTO produto_tamanhos (produto_id, tamanho) VALUES (?, ?)');
-  (tamanhos || []).forEach(t => insTamanho.run(produtoId, t));
+  for (const t of (tamanhos || [])) await insTamanho.run(produtoId, t);
   const insCor = db.prepare('INSERT INTO produto_cores (produto_id, cor_nome, cor_hex) VALUES (?, ?, ?)');
-  (cores || []).forEach(c => insCor.run(produtoId, c.cor_nome || c.nome, c.cor_hex || c.hex || '#333333'));
+  for (const c of (cores || [])) await insCor.run(produtoId, c.cor_nome || c.nome, c.cor_hex || c.hex || '#333333');
   const insLinha = db.prepare('INSERT INTO produto_linhas (produto_id, linha_id) VALUES (?, ?)');
-  (Array.isArray(linhas_ids) ? linhas_ids : []).map(n => parseInt(n, 10)).filter(Number.isInteger)
-    .forEach(linhaId => insLinha.run(produtoId, linhaId));
+  const linhasLimpa = (Array.isArray(linhas_ids) ? linhas_ids : []).map(n => parseInt(n, 10)).filter(Number.isInteger);
+  for (const linhaId of linhasLimpa) await insLinha.run(produtoId, linhaId);
 
   res.status(201).json({ id: produtoId, aviso: !ehSuperadmin(req) ? 'Produto criado sem preço de venda. Peça ao superadmin para definir o custo e liberar o preço.' : undefined });
 });
 
-router.put('/produtos/:id', (req, res) => {
-  const produto = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
+router.put('/produtos/:id', async (req, res) => {
+  const produto = await db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
 
   const { categoria_id, codigo, nome, descricao, tipo_estoque, imagem_url, destaque, publico } = req.body || {};
   const novaImagem = imagem_url !== undefined ? (imagem_url || null) : produto.imagem_url;
-  db.prepare(`UPDATE produtos SET categoria_id = ?, codigo = ?, nome = ?, descricao = ?, tipo_estoque = ?, publico = ?, imagem_url = ?, destaque = ?, atualizado_em = datetime('now')
+  await db.prepare(`UPDATE produtos SET categoria_id = ?, codigo = ?, nome = ?, descricao = ?, tipo_estoque = ?, publico = ?, imagem_url = ?, destaque = ?, atualizado_em = datetime('now')
     WHERE id = ?`).run(
       categoria_id || produto.categoria_id,
       codigo !== undefined ? codigo : produto.codigo,
@@ -218,36 +218,36 @@ router.put('/produtos/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-router.put('/produtos/:id/tamanhos-cores', (req, res) => {
-  const produto = db.prepare('SELECT id FROM produtos WHERE id = ?').get(req.params.id);
+router.put('/produtos/:id/tamanhos-cores', async (req, res) => {
+  const produto = await db.prepare('SELECT id FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
   const { tamanhos, cores } = req.body || {};
 
-  const tx = db.transaction(() => {
+  const tx = db.transaction(async (txDb) => {
     if (Array.isArray(tamanhos)) {
-      db.prepare('DELETE FROM produto_tamanhos WHERE produto_id = ?').run(produto.id);
-      const ins = db.prepare('INSERT INTO produto_tamanhos (produto_id, tamanho) VALUES (?, ?)');
-      tamanhos.forEach(t => ins.run(produto.id, t));
+      await txDb.prepare('DELETE FROM produto_tamanhos WHERE produto_id = ?').run(produto.id);
+      const ins = txDb.prepare('INSERT INTO produto_tamanhos (produto_id, tamanho) VALUES (?, ?)');
+      for (const t of tamanhos) await ins.run(produto.id, t);
     }
     if (Array.isArray(cores)) {
       // A lista chega inteira e substitui a anterior. As fotos por cor sao
       // guardadas antes e devolvidas pelo nome da cor: sem isso, salvar a grade
       // de tamanhos apagaria as fotos que o admin ja tinha enviado.
       const fotosPorCor = new Map(
-        db.prepare('SELECT cor_nome, imagem_url FROM produto_cores WHERE produto_id = ? AND imagem_url IS NOT NULL')
-          .all(produto.id).map(c => [c.cor_nome, c.imagem_url])
+        (await txDb.prepare('SELECT cor_nome, imagem_url FROM produto_cores WHERE produto_id = ? AND imagem_url IS NOT NULL')
+          .all(produto.id)).map(c => [c.cor_nome, c.imagem_url])
       );
       const enviadas = new Set(cores.map(c => c.cor_nome || c.nome));
 
-      db.prepare('DELETE FROM produto_cores WHERE produto_id = ?').run(produto.id);
-      const ins = db.prepare('INSERT INTO produto_cores (produto_id, cor_nome, cor_hex, imagem_url) VALUES (?, ?, ?, ?)');
-      cores.forEach(c => {
+      await txDb.prepare('DELETE FROM produto_cores WHERE produto_id = ?').run(produto.id);
+      const ins = txDb.prepare('INSERT INTO produto_cores (produto_id, cor_nome, cor_hex, imagem_url) VALUES (?, ?, ?, ?)');
+      for (const c of cores) {
         const nome = c.cor_nome || c.nome;
         // `imagem_url` no corpo tem prioridade (a tela pode ter acabado de trocar);
         // se nao veio, mantem a que ja existia para aquela cor.
         const foto = c.imagem_url !== undefined ? (c.imagem_url || null) : (fotosPorCor.get(nome) || null);
-        ins.run(produto.id, nome, c.cor_hex || c.hex || '#333333', foto);
-      });
+        await ins.run(produto.id, nome, c.cor_hex || c.hex || '#333333', foto);
+      }
 
       // Cor removida da lista: o arquivo dela sai do disco.
       for (const [nome, url] of fotosPorCor) {
@@ -255,25 +255,25 @@ router.put('/produtos/:id/tamanhos-cores', (req, res) => {
       }
     }
   });
-  tx();
+  await tx();
   res.json({ ok: true });
 });
 
 // Substitui o conjunto de linhas do produto pelo que veio no corpo (nenhuma,
 // uma, várias ou todas as linhas cadastradas).
-router.put('/produtos/:id/linhas', (req, res) => {
-  const produto = db.prepare('SELECT id FROM produtos WHERE id = ?').get(req.params.id);
+router.put('/produtos/:id/linhas', async (req, res) => {
+  const produto = await db.prepare('SELECT id FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
 
   const linhasIds = [...new Set((Array.isArray((req.body || {}).linhas_ids) ? req.body.linhas_ids : [])
     .map(n => parseInt(n, 10)).filter(Number.isInteger))];
 
-  const gravar = db.transaction(() => {
-    db.prepare('DELETE FROM produto_linhas WHERE produto_id = ?').run(produto.id);
-    const ins = db.prepare('INSERT INTO produto_linhas (produto_id, linha_id) VALUES (?, ?)');
-    linhasIds.forEach(linhaId => ins.run(produto.id, linhaId));
+  const gravar = db.transaction(async (tx) => {
+    await tx.prepare('DELETE FROM produto_linhas WHERE produto_id = ?').run(produto.id);
+    const ins = tx.prepare('INSERT INTO produto_linhas (produto_id, linha_id) VALUES (?, ?)');
+    for (const linhaId of linhasIds) await ins.run(produto.id, linhaId);
   });
-  gravar();
+  await gravar();
 
   res.json({ ok: true, linhas_ids: linhasIds });
 });
@@ -281,8 +281,8 @@ router.put('/produtos/:id/linhas', (req, res) => {
 // ---------- Foto do produto ----------
 // A mesma imagem alimenta a vitrine, o carrossel da home, a pagina do produto
 // e o catalogo em PDF: todos leem produtos.imagem_url.
-router.post('/produtos/:id/imagem', receberImagemProduto, (req, res) => {
-  const produto = db.prepare('SELECT id, imagem_url FROM produtos WHERE id = ?').get(req.params.id);
+router.post('/produtos/:id/imagem', receberImagemProduto, async (req, res) => {
+  const produto = await db.prepare('SELECT id, imagem_url FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) {
     if (req.file) removerArquivoLocal(`${URL_BASE}/${req.file.filename}`);
     return res.status(404).json({ erro: 'Produto não encontrado.' });
@@ -290,7 +290,7 @@ router.post('/produtos/:id/imagem', receberImagemProduto, (req, res) => {
   if (!req.file) return res.status(400).json({ erro: 'Nenhuma imagem foi enviada.' });
 
   const imagemUrl = `${URL_BASE}/${req.file.filename}`;
-  db.prepare(`UPDATE produtos SET imagem_url = ?, atualizado_em = datetime('now') WHERE id = ?`)
+  await db.prepare(`UPDATE produtos SET imagem_url = ?, atualizado_em = datetime('now') WHERE id = ?`)
     .run(imagemUrl, produto.id);
 
   // Troca de foto: o arquivo antigo sai do disco para nao acumular lixo.
@@ -304,13 +304,13 @@ router.post('/produtos/:id/imagem', receberImagemProduto, (req, res) => {
 // principal quando o cliente escolhe a cor; sem foto propria, a cor mostra a
 // foto do produto. O :id na URL e' o do produto (o multer usa para nomear o
 // arquivo), e :corId identifica a linha em produto_cores.
-function corDoProduto(req) {
+async function corDoProduto(req) {
   return db.prepare('SELECT * FROM produto_cores WHERE id = ? AND produto_id = ?')
     .get(req.params.corId, req.params.id);
 }
 
-router.post('/produtos/:id/cores/:corId/imagem', receberImagemProduto, (req, res) => {
-  const cor = corDoProduto(req);
+router.post('/produtos/:id/cores/:corId/imagem', receberImagemProduto, async (req, res) => {
+  const cor = await corDoProduto(req);
   if (!cor) {
     if (req.file) removerArquivoLocal(`${URL_BASE}/${req.file.filename}`);
     return res.status(404).json({ erro: 'Cor não encontrada neste produto.' });
@@ -318,77 +318,77 @@ router.post('/produtos/:id/cores/:corId/imagem', receberImagemProduto, (req, res
   if (!req.file) return res.status(400).json({ erro: 'Nenhuma imagem foi enviada.' });
 
   const imagemUrl = `${URL_BASE}/${req.file.filename}`;
-  db.prepare('UPDATE produto_cores SET imagem_url = ? WHERE id = ?').run(imagemUrl, cor.id);
+  await db.prepare('UPDATE produto_cores SET imagem_url = ? WHERE id = ?').run(imagemUrl, cor.id);
   if (cor.imagem_url && cor.imagem_url !== imagemUrl) removerArquivoLocal(cor.imagem_url);
 
   res.status(201).json({ ok: true, cor_id: cor.id, imagem_url: imagemUrl });
 });
 
-router.delete('/produtos/:id/cores/:corId/imagem', (req, res) => {
-  const cor = corDoProduto(req);
+router.delete('/produtos/:id/cores/:corId/imagem', async (req, res) => {
+  const cor = await corDoProduto(req);
   if (!cor) return res.status(404).json({ erro: 'Cor não encontrada neste produto.' });
 
-  db.prepare('UPDATE produto_cores SET imagem_url = NULL WHERE id = ?').run(cor.id);
+  await db.prepare('UPDATE produto_cores SET imagem_url = NULL WHERE id = ?').run(cor.id);
   removerArquivoLocal(cor.imagem_url);
   res.json({ ok: true, cor_id: cor.id, imagem_url: null });
 });
 
-router.delete('/produtos/:id/imagem', (req, res) => {
-  const produto = db.prepare('SELECT id, imagem_url FROM produtos WHERE id = ?').get(req.params.id);
+router.delete('/produtos/:id/imagem', async (req, res) => {
+  const produto = await db.prepare('SELECT id, imagem_url FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
 
-  db.prepare(`UPDATE produtos SET imagem_url = NULL, atualizado_em = datetime('now') WHERE id = ?`).run(produto.id);
+  await db.prepare(`UPDATE produtos SET imagem_url = NULL, atualizado_em = datetime('now') WHERE id = ?`).run(produto.id);
   removerArquivoLocal(produto.imagem_url);
   res.json({ ok: true, imagem_url: null });
 });
 
-router.put('/produtos/:id/estoque', (req, res) => {
-  const produto = db.prepare('SELECT id FROM produtos WHERE id = ?').get(req.params.id);
+router.put('/produtos/:id/estoque', async (req, res) => {
+  const produto = await db.prepare('SELECT id FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
   const { tamanho, cor, quantidade } = req.body || {};
   const qtd = Math.max(0, parseInt(quantidade, 10) || 0);
-  db.prepare(`INSERT INTO produto_estoque (produto_id, tamanho, cor, quantidade) VALUES (?, ?, ?, ?)
+  await db.prepare(`INSERT INTO produto_estoque (produto_id, tamanho, cor, quantidade) VALUES (?, ?, ?, ?)
     ON CONFLICT(produto_id, tamanho, cor) DO UPDATE SET quantidade = excluded.quantidade`)
     .run(produto.id, tamanho || null, cor || null, qtd);
   res.json({ ok: true });
 });
 
 // Liga/desliga a vitrine em destaque (carrossel da home).
-router.put('/produtos/:id/destaque', (req, res) => {
+router.put('/produtos/:id/destaque', async (req, res) => {
   const { destaque } = req.body || {};
-  db.prepare(`UPDATE produtos SET destaque = ?, atualizado_em = datetime('now') WHERE id = ?`)
+  await db.prepare(`UPDATE produtos SET destaque = ?, atualizado_em = datetime('now') WHERE id = ?`)
     .run(destaque ? 1 : 0, req.params.id);
   res.json({ ok: true });
 });
 
-router.put('/produtos/:id/ativo', (req, res) => {
+router.put('/produtos/:id/ativo', async (req, res) => {
   const { ativo } = req.body || {};
-  db.prepare(`UPDATE produtos SET ativo = ?, atualizado_em = datetime('now') WHERE id = ?`).run(ativo ? 1 : 0, req.params.id);
+  await db.prepare(`UPDATE produtos SET ativo = ?, atualizado_em = datetime('now') WHERE id = ?`).run(ativo ? 1 : 0, req.params.id);
   res.json({ ok: true });
 });
 
-router.delete('/produtos/:id', (req, res) => {
-  const produto = db.prepare('SELECT id, imagem_url FROM produtos WHERE id = ?').get(req.params.id);
+router.delete('/produtos/:id', async (req, res) => {
+  const produto = await db.prepare('SELECT id, imagem_url FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
 
   // Fotos por cor: lidas antes do CASCADE levar as linhas embora.
-  const fotosDasCores = db.prepare('SELECT imagem_url FROM produto_cores WHERE produto_id = ? AND imagem_url IS NOT NULL')
-    .all(produto.id).map(c => c.imagem_url);
+  const fotosDasCores = (await db.prepare('SELECT imagem_url FROM produto_cores WHERE produto_id = ? AND imagem_url IS NOT NULL')
+    .all(produto.id)).map(c => c.imagem_url);
 
   // Tamanhos, cores e estoque saem por ON DELETE CASCADE. As tabelas abaixo
   // apontam para produtos SEM cascade, entao a exclusao esbarrava na chave
   // estrangeira e voltava erro 500 — bastava o produto ter uma visualizacao
   // registrada, um item em carrinho ou uma linha de historico de preco.
-  const excluir = db.transaction(() => {
+  const excluir = db.transaction(async (tx) => {
     // Pedido ja fechado nao pode sumir: pedido_itens guarda nome, preco e custo
     // do momento da compra, entao basta soltar a referencia ao produto.
-    db.prepare('UPDATE pedido_itens SET produto_id = NULL WHERE produto_id = ?').run(produto.id);
+    await tx.prepare('UPDATE pedido_itens SET produto_id = NULL WHERE produto_id = ?').run(produto.id);
     for (const tabela of ['historico_precos', 'eventos_analytics', 'interesses', 'encomendas', 'carrinho_itens']) {
-      db.prepare(`DELETE FROM ${tabela} WHERE produto_id = ?`).run(produto.id);
+      await tx.prepare(`DELETE FROM ${tabela} WHERE produto_id = ?`).run(produto.id);
     }
-    db.prepare('DELETE FROM produtos WHERE id = ?').run(produto.id);
+    await tx.prepare('DELETE FROM produtos WHERE id = ?').run(produto.id);
   });
-  excluir();
+  await excluir();
 
   removerArquivoLocal(produto.imagem_url);
   fotosDasCores.forEach(removerArquivoLocal);
@@ -396,32 +396,35 @@ router.delete('/produtos/:id', (req, res) => {
 });
 
 // ---------- Encomendas / avisos de estoque ----------
-router.get('/encomendas', (req, res) => {
-  const rows = db.prepare(`
+router.get('/encomendas', async (req, res) => {
+  const rows = await db.prepare(`
     SELECT e.*, p.nome AS produto_nome FROM encomendas e JOIN produtos p ON p.id = e.produto_id
     ORDER BY e.criado_em DESC
   `).all();
   res.json(rows);
 });
 
-router.put('/encomendas/:id/status', (req, res) => {
+router.put('/encomendas/:id/status', async (req, res) => {
   const { status } = req.body || {};
   if (!['aguardando', 'avisado', 'atendido', 'cancelado'].includes(status)) {
     return res.status(400).json({ erro: 'Status inválido.' });
   }
-  db.prepare('UPDATE encomendas SET status = ? WHERE id = ?').run(status, req.params.id);
+  await db.prepare('UPDATE encomendas SET status = ? WHERE id = ?').run(status, req.params.id);
   res.json({ ok: true });
 });
 
 // ---------- Pedidos ----------
-router.get('/pedidos', (req, res) => {
-  const pedidos = db.prepare('SELECT * FROM pedidos ORDER BY id DESC').all();
-  res.json(pedidos.map(p => ({ ...p, itens: db.prepare('SELECT * FROM pedido_itens WHERE pedido_id = ?').all(p.id) })));
+router.get('/pedidos', async (req, res) => {
+  const pedidos = await db.prepare('SELECT * FROM pedidos ORDER BY id DESC').all();
+  res.json(await Promise.all(pedidos.map(async p => ({
+    ...p,
+    itens: await db.prepare('SELECT * FROM pedido_itens WHERE pedido_id = ?').all(p.id)
+  }))));
 });
 
 // ---------- Clientes ----------
-router.get('/clientes', (req, res) => {
-  const clientes = db.prepare(`
+router.get('/clientes', async (req, res) => {
+  const clientes = await db.prepare(`
     SELECT cl.*,
       (SELECT COUNT(*) FROM pedidos p WHERE p.cliente_id = cl.id) AS total_pedidos,
       (SELECT IFNULL(SUM(p.valor_final),0) FROM pedidos p
@@ -434,9 +437,9 @@ router.get('/clientes', (req, res) => {
 });
 
 // ---------- Pesquisa de satisfacao (CSAT) ----------
-router.get('/csat', (req, res) => {
-  const respostas = db.prepare('SELECT * FROM csat ORDER BY criado_em DESC').all();
-  const resumo = db.prepare(`
+router.get('/csat', async (req, res) => {
+  const respostas = await db.prepare('SELECT * FROM csat ORDER BY criado_em DESC').all();
+  const resumo = await db.prepare(`
     SELECT COUNT(*) AS total,
       ROUND(AVG(nota_precos), 2) AS media_precos,
       ROUND(AVG(nota_site), 2) AS media_site,
@@ -450,11 +453,11 @@ router.get('/csat', (req, res) => {
 
 // Cupons: cadastro é exclusivo do superadmin (ver routes/superadmin.js).
 
-router.put('/pedidos/:id/status', (req, res) => {
+router.put('/pedidos/:id/status', async (req, res) => {
   const { status } = req.body || {};
   const validos = ['aguardando_pagamento', 'pago', 'enviado', 'recebido', 'finalizado', 'cancelado'];
   if (!validos.includes(status)) return res.status(400).json({ erro: 'Status inválido.' });
-  db.prepare(`UPDATE pedidos SET status = ?, atualizado_em = datetime('now') WHERE id = ?`).run(status, req.params.id);
+  await db.prepare(`UPDATE pedidos SET status = ?, atualizado_em = datetime('now') WHERE id = ?`).run(status, req.params.id);
   res.json({ ok: true });
 });
 

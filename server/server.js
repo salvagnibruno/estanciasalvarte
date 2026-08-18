@@ -1,8 +1,8 @@
 require('dotenv').config();
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
-const session = require('express-session');
-const SqliteStore = require('better-sqlite3-session-store')(session);
+const cookieSession = require('cookie-session');
 const db = require('./db/db');
 const { usuarioAtual } = require('./middleware/auth');
 
@@ -11,18 +11,22 @@ app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use(session({
-  store: new SqliteStore({ client: db, expired: { clear: true, intervalMs: 15 * 60 * 1000 } }),
+// Sessão guardada inteira num cookie assinado (sem tabela de sessão no banco):
+// funciona sem nenhuma mudança em hospedagem com disco efêmero (Render free,
+// por exemplo) — a sessão não some quando a instância reinicia.
+app.use(cookieSession({
   name: 'estancia.sid',
-  secret: process.env.SESSION_SECRET || 'estancia-salvarte-troque-esta-chave',
-  resave: false,
-  saveUninitialized: true,
-  cookie: {
-    maxAge: 1000 * 60 * 60 * 24 * 30,
-    secure: process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false',
-    sameSite: 'lax'
-  }
+  keys: [process.env.SESSION_SECRET || 'estancia-salvarte-troque-esta-chave'],
+  maxAge: 1000 * 60 * 60 * 24 * 30,
+  secure: process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false',
+  sameSite: 'lax'
 }));
+// cookie-session não tem req.sessionID (não existe um registro no servidor) —
+// esse identificador próprio substitui, para carrinho de visitante e analytics.
+app.use((req, res, next) => {
+  if (req.session && !req.session.sid) req.session.sid = crypto.randomUUID();
+  next();
+});
 app.use(usuarioAtual);
 
 // ---------- Rotas de API ----------
@@ -56,27 +60,22 @@ app.use('/api/cupons', cuponsRoutes);
 
 // ---------- Registro de acessos as paginas ----------
 // Grava so a navegacao em paginas (nao arquivos estaticos nem chamadas de API),
-// para analise posterior junto com pedidos e cadastros.
-const registrarAcesso = db.prepare(
-  `INSERT INTO acessos (usuario_id, sessao_id, caminho, referencia, user_agent) VALUES (?, ?, ?, ?, ?)`
-);
-
+// para analise posterior junto com pedidos e cadastros. Sem aguardar: não
+// atrasa a resposta da página por causa de um insert de log.
 app.use((req, res, next) => {
   const ehPagina = req.method === 'GET'
     && !req.path.startsWith('/api/')
     && (req.path === '/' || req.path.endsWith('.html'));
   if (ehPagina) {
-    try {
-      registrarAcesso.run(
-        req.session.usuario ? req.session.usuario.id : null,
-        req.sessionID,
-        req.path,
-        req.get('referer') || null,
-        (req.get('user-agent') || '').slice(0, 300)
-      );
-    } catch (e) {
-      console.error('[acessos] não foi possível registrar:', e.message);
-    }
+    db.prepare(
+      `INSERT INTO acessos (usuario_id, sessao_id, caminho, referencia, user_agent) VALUES (?, ?, ?, ?, ?)`
+    ).run(
+      req.session.usuario ? req.session.usuario.id : null,
+      req.session.sid,
+      req.path,
+      req.get('referer') || null,
+      (req.get('user-agent') || '').slice(0, 300)
+    ).catch(e => console.error('[acessos] não foi possível registrar:', e.message));
   }
   next();
 });
@@ -109,6 +108,17 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Estância Salvarte rodando em http://localhost:${PORT}`);
-});
+
+// O banco (schema, migrações, seed, superadmin de bootstrap) é assíncrono
+// agora (driver do Turso/libsql) — o servidor só aceita requisições depois
+// que tudo isso terminar.
+db.iniciar()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Estância Salvarte rodando em http://localhost:${PORT}`);
+    });
+  })
+  .catch(e => {
+    console.error('[startup] não foi possível iniciar o banco de dados:', e);
+    process.exit(1);
+  });

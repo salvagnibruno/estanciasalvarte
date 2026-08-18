@@ -12,8 +12,8 @@ function usuarioPublico(u) {
 // O que vai para a tela: os dados da sessao + as permissoes efetivas de agora.
 // As permissoes nao ficam na sessao de proposito — assim o painel enxerga a
 // liberacao (ou a revogacao) do superadmin no proximo carregamento.
-function usuarioComPermissoes(u) {
-  return { ...u, permissoes: permissoesDe(u) };
+async function usuarioComPermissoes(u) {
+  return { ...u, permissoes: await permissoesDe(u) };
 }
 
 const VALIDADE_CODIGO_MIN = 15;
@@ -36,7 +36,7 @@ router.post('/registro', async (req, res) => {
   if (String(senha).length < 6) return res.status(400).json({ erro: 'A senha deve ter ao menos 6 caracteres.' });
 
   const emailLimpo = email.toLowerCase().trim();
-  const existente = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(emailLimpo);
+  const existente = await db.prepare('SELECT * FROM usuarios WHERE email = ?').get(emailLimpo);
   if (existente && existente.email_verificado) {
     return res.status(409).json({ erro: 'Já existe uma conta com este e-mail.' });
   }
@@ -48,11 +48,11 @@ router.post('/registro', async (req, res) => {
 
   if (existente) {
     // Cadastro anterior nunca foi confirmado: atualiza os dados e manda um codigo novo.
-    db.prepare(`UPDATE usuarios SET nome = ?, senha_hash = ?, telefone = ?,
+    await db.prepare(`UPDATE usuarios SET nome = ?, senha_hash = ?, telefone = ?,
         codigo_verificacao = ?, codigo_expira_em = ?, codigo_enviado_em = datetime('now') WHERE id = ?`)
       .run(nomeLimpo, hash, telefone || null, codigo, expiraEm, existente.id);
   } else {
-    db.prepare(`INSERT INTO usuarios
+    await db.prepare(`INSERT INTO usuarios
         (nome, email, senha_hash, telefone, papel, ativo, email_verificado, codigo_verificacao, codigo_expira_em, codigo_enviado_em)
         VALUES (?, ?, ?, ?, 'cliente', 1, 0, ?, ?, datetime('now'))`)
       .run(nomeLimpo, emailLimpo, hash, telefone || null, codigo, expiraEm);
@@ -63,11 +63,11 @@ router.post('/registro', async (req, res) => {
 });
 
 // Confirma o codigo de 6 digitos enviado por e-mail e, so' entao, abre a sessao.
-router.post('/confirmar', (req, res) => {
+router.post('/confirmar', async (req, res) => {
   const { email, codigo } = req.body || {};
   if (!email || !codigo) return res.status(400).json({ erro: 'Informe e-mail e código.' });
 
-  const usuario = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(String(email).toLowerCase().trim());
+  const usuario = await db.prepare('SELECT * FROM usuarios WHERE email = ?').get(String(email).toLowerCase().trim());
   if (!usuario) return res.status(404).json({ erro: 'Conta não encontrada.' });
   if (usuario.email_verificado) return res.status(400).json({ erro: 'Esta conta já está confirmada. Faça login.' });
   if (!usuario.codigo_verificacao || String(codigo).trim() !== usuario.codigo_verificacao) {
@@ -77,11 +77,11 @@ router.post('/confirmar', (req, res) => {
     return res.status(400).json({ erro: 'Código expirado. Peça um novo código.' });
   }
 
-  db.prepare(`UPDATE usuarios SET email_verificado = 1, codigo_verificacao = NULL, codigo_expira_em = NULL WHERE id = ?`)
+  await db.prepare(`UPDATE usuarios SET email_verificado = 1, codigo_verificacao = NULL, codigo_expira_em = NULL WHERE id = ?`)
     .run(usuario.id);
 
   req.session.usuario = usuarioPublico(usuario);
-  res.json(usuarioComPermissoes(req.session.usuario));
+  res.json(await usuarioComPermissoes(req.session.usuario));
 });
 
 // Reenvia o codigo de confirmacao (com um pequeno intervalo minimo entre pedidos).
@@ -89,7 +89,7 @@ router.post('/reenviar-codigo', async (req, res) => {
   const { email } = req.body || {};
   if (!email) return res.status(400).json({ erro: 'Informe o e-mail.' });
 
-  const usuario = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(String(email).toLowerCase().trim());
+  const usuario = await db.prepare('SELECT * FROM usuarios WHERE email = ?').get(String(email).toLowerCase().trim());
   if (!usuario) return res.status(404).json({ erro: 'Conta não encontrada.' });
   if (usuario.email_verificado) return res.status(400).json({ erro: 'Esta conta já está confirmada. Faça login.' });
 
@@ -100,18 +100,18 @@ router.post('/reenviar-codigo', async (req, res) => {
   }
 
   const codigo = gerarCodigo();
-  db.prepare(`UPDATE usuarios SET codigo_verificacao = ?, codigo_expira_em = ?, codigo_enviado_em = datetime('now') WHERE id = ?`)
+  await db.prepare(`UPDATE usuarios SET codigo_verificacao = ?, codigo_expira_em = ?, codigo_enviado_em = datetime('now') WHERE id = ?`)
     .run(codigo, expiraEmDaqui(VALIDADE_CODIGO_MIN), usuario.id);
 
   await enviarCodigoConfirmacao(usuario.email, usuario.nome, codigo);
   res.json({ ok: true });
 });
 
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const { email, senha } = req.body || {};
   if (!email || !senha) return res.status(400).json({ erro: 'Informe e-mail e senha.' });
 
-  const usuario = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(email.toLowerCase().trim());
+  const usuario = await db.prepare('SELECT * FROM usuarios WHERE email = ?').get(email.toLowerCase().trim());
   if (!usuario || !usuario.ativo) return res.status(401).json({ erro: 'Credenciais inválidas ou usuário inativo.' });
 
   // A senha e' checada ANTES de revelar se a conta esta' pendente de confirmacao —
@@ -129,15 +129,16 @@ router.post('/login', (req, res) => {
   }
 
   req.session.usuario = usuarioPublico(usuario);
-  res.json(usuarioComPermissoes(req.session.usuario));
+  res.json(await usuarioComPermissoes(req.session.usuario));
 });
 
 router.post('/logout', (req, res) => {
-  req.session.destroy(() => res.json({ ok: true }));
+  req.session = null; // cookie-session: sessao some assim, sem callback
+  res.json({ ok: true });
 });
 
-router.get('/me', (req, res) => {
-  res.json(req.session.usuario ? usuarioComPermissoes(req.session.usuario) : null);
+router.get('/me', async (req, res) => {
+  res.json(req.session.usuario ? await usuarioComPermissoes(req.session.usuario) : null);
 });
 
 module.exports = router;

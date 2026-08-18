@@ -2,27 +2,37 @@
 // schema.sql cria tudo do zero em bancos novos; aqui ajustamos os antigos.
 // Pode rodar quantas vezes for preciso: cada passo verifica antes de agir.
 
-function colunas(db, tabela) {
-  return db.prepare(`PRAGMA table_info(${tabela})`).all().map(c => c.name);
+async function colunas(db, tabela) {
+  return (await db.prepare(`PRAGMA table_info(${tabela})`).all()).map(c => c.name);
 }
 
-function adicionarColuna(db, tabela, nome, definicao) {
-  if (colunas(db, tabela).includes(nome)) return false;
-  db.exec(`ALTER TABLE ${tabela} ADD COLUMN ${nome} ${definicao}`);
+async function adicionarColuna(db, tabela, nome, definicao) {
+  if ((await colunas(db, tabela)).includes(nome)) return false;
+  await db.exec(`ALTER TABLE ${tabela} ADD COLUMN ${nome} ${definicao}`);
   return true;
+}
+
+// Marca de "já rodou uma vez" — substitui o antigo PRAGMA user_version (que
+// era exclusivo do better-sqlite3) por uma linha na tabela configuracoes.
+async function jaFeito(db, chave) {
+  return !!(await db.prepare('SELECT 1 FROM configuracoes WHERE chave = ?').get(chave));
+}
+async function marcarFeito(db, chave) {
+  await db.prepare(`INSERT INTO configuracoes (chave, valor) VALUES (?, '1')
+    ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`).run(chave);
 }
 
 // Classificacao inicial do publico, na mesma regra que o formulario de produto
 // aplica: vale o que estiver escrito, olhando a descricao, depois o nome e por
 // fim o nome da categoria. Texto que cita os dois generos ("masculinas e
 // femininas") descreve peca que serve aos dois, entao continua unissex.
-function classificarPublico(db) {
+async function classificarPublico(db) {
   // Só mexe em quem ainda esta' unissex, e so quando aquele campo cita um genero
   // sem citar o outro. `campo` e' interpolado, mas vem da lista fixa abaixo.
-  const porCampo = (valor, campo, palavra, oposta) => db.prepare(`
+  const porCampo = async (valor, campo, palavra, oposta) => (await db.prepare(`
     UPDATE produtos SET publico = ?
     WHERE publico = 'unissex' AND ${campo} LIKE ? AND ${campo} NOT LIKE ?
-  `).run(valor, palavra, oposta).changes;
+  `).run(valor, palavra, oposta)).changes;
 
   // Um campo so' e' consultado se os anteriores nao disserem nada — a descricao
   // que cita os dois generos ja resolve a peca como unissex e barra o resto.
@@ -37,10 +47,10 @@ function classificarPublico(db) {
   let feminino = 0;
   let masculino = 0;
   for (const campo of CAMPOS) {
-    feminino += porCampo('feminino', campo, '%feminin%', '%masculin%');
-    masculino += porCampo('masculino', campo, '%masculin%', '%feminin%');
+    feminino += await porCampo('feminino', campo, '%feminin%', '%masculin%');
+    masculino += await porCampo('masculino', campo, '%masculin%', '%feminin%');
   }
-  const unissex = db.prepare("SELECT COUNT(*) AS total FROM produtos WHERE publico = 'unissex'").get().total;
+  const unissex = (await db.prepare("SELECT COUNT(*) AS total FROM produtos WHERE publico = 'unissex'").get()).total;
   return { masculino, feminino, unissex, texto: `${masculino} masculino(s), ${feminino} feminino(s), ${unissex} unissex` };
 }
 
@@ -48,9 +58,9 @@ function classificarPublico(db) {
 // a classificacao da migracao acontece uma vez so, e a loja pode querer rodar de
 // novo depois de reescrever as descricoes.
 function reclassificarPublico(db) {
-  return db.transaction(() => {
-    db.prepare("UPDATE produtos SET publico = 'unissex'").run();
-    return classificarPublico(db);
+  return db.transaction(async (tx) => {
+    await tx.prepare("UPDATE produtos SET publico = 'unissex'").run();
+    return classificarPublico(tx);
   })();
 }
 
@@ -68,110 +78,108 @@ const STATUS_ANTIGOS = {
 // da compra à parte), exatamente como já acontece ao excluir um produto pelo
 // painel. Depois desta limpeza, db/seed.js roda e cadastra os produtos novos.
 const CATALOGO_VERSAO_ATUAL = 2;
-function resetarCatalogoAntigo(db) {
-  const row = db.prepare(`SELECT valor FROM configuracoes WHERE chave = 'catalogo_versao'`).get();
+async function resetarCatalogoAntigo(db) {
+  const row = await db.prepare(`SELECT valor FROM configuracoes WHERE chave = 'catalogo_versao'`).get();
   const versaoAtual = row ? parseInt(row.valor, 10) : 1;
   if (versaoAtual >= CATALOGO_VERSAO_ATUAL) return false;
 
-  const limpar = db.transaction(() => {
-    db.prepare('UPDATE pedido_itens SET produto_id = NULL WHERE produto_id IS NOT NULL').run();
-    db.prepare('DELETE FROM eventos_analytics WHERE produto_id IS NOT NULL').run();
+  const limpar = db.transaction(async (tx) => {
+    await tx.prepare('UPDATE pedido_itens SET produto_id = NULL WHERE produto_id IS NOT NULL').run();
+    await tx.prepare('DELETE FROM eventos_analytics WHERE produto_id IS NOT NULL').run();
     for (const tabela of ['produto_tamanhos', 'produto_cores', 'produto_estoque', 'cupom_produtos',
       'produto_linhas', 'interesses', 'encomendas', 'carrinho_itens', 'historico_precos']) {
-      db.prepare(`DELETE FROM ${tabela}`).run();
+      await tx.prepare(`DELETE FROM ${tabela}`).run();
     }
-    db.prepare('DELETE FROM produtos').run();
-    db.prepare('DELETE FROM linhas').run();
-    db.prepare('DELETE FROM categorias').run();
-    db.prepare(`INSERT INTO configuracoes (chave, valor) VALUES ('catalogo_versao', ?)
+    await tx.prepare('DELETE FROM produtos').run();
+    await tx.prepare('DELETE FROM linhas').run();
+    await tx.prepare('DELETE FROM categorias').run();
+    await tx.prepare(`INSERT INTO configuracoes (chave, valor) VALUES ('catalogo_versao', ?)
       ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`).run(String(CATALOGO_VERSAO_ATUAL));
   });
-  limpar();
+  await limpar();
   return true;
 }
 
-function migrar(db) {
+async function migrar(db) {
   const mudancas = [];
 
   // ---------- produtos: vitrine em destaque e preco promocional ----------
-  if (adicionarColuna(db, 'produtos', 'preco_promocional', 'REAL')) mudancas.push('produtos.preco_promocional');
-  if (adicionarColuna(db, 'produtos', 'destaque', 'INTEGER NOT NULL DEFAULT 0')) mudancas.push('produtos.destaque');
+  if (await adicionarColuna(db, 'produtos', 'preco_promocional', 'REAL')) mudancas.push('produtos.preco_promocional');
+  if (await adicionarColuna(db, 'produtos', 'destaque', 'INTEGER NOT NULL DEFAULT 0')) mudancas.push('produtos.destaque');
 
   // ---------- produtos: publico (masculino / feminino / unissex) ----------
   // Recorte usado na exportacao do catalogo. Na criacao da coluna, os produtos
   // que ja se identificam no proprio nome (ou na categoria) sao classificados
   // uma unica vez; o resto fica 'unissex' para o admin ajustar na tela.
-  if (adicionarColuna(db, 'produtos', 'publico', "TEXT NOT NULL DEFAULT 'unissex'")) {
+  if (await adicionarColuna(db, 'produtos', 'publico', "TEXT NOT NULL DEFAULT 'unissex'")) {
     mudancas.push('produtos.publico');
-    mudancas.push(`publico inicial: ${classificarPublico(db).texto}`);
+    mudancas.push(`publico inicial: ${(await classificarPublico(db)).texto}`);
   }
 
   // A primeira versao do publico classificava por palavras soltas no nome
   // ("prenda", "saia"). A regra passou a ser a do formulario — a descricao manda,
   // depois o nome, depois a categoria — entao os bancos que ja tinham a coluna
-  // precisam de uma releitura. `user_version` marca que ja foi feita: nao se
-  // repete a cada subida e nao desfaz o que a loja ajustar a mao depois.
-  const VERSAO_AJUSTES = 1;
-  if (db.pragma('user_version', { simple: true }) < VERSAO_AJUSTES) {
-    mudancas.push(`publico relido pela descrição: ${reclassificarPublico(db).texto}`);
-    db.pragma(`user_version = ${VERSAO_AJUSTES}`);
+  // precisam de uma releitura. Roda uma unica vez (marca em `configuracoes`):
+  // nao se repete a cada subida e nao desfaz o que a loja ajustar a mao depois.
+  if (!(await jaFeito(db, 'publico_relido_v1'))) {
+    mudancas.push(`publico relido pela descrição: ${(await reclassificarPublico(db)).texto}`);
+    await marcarFeito(db, 'publico_relido_v1');
   }
 
   // ---------- produto_cores: foto por cor ----------
   // A pagina do produto troca a imagem principal quando o cliente escolhe a cor.
-  if (adicionarColuna(db, 'produto_cores', 'imagem_url', 'TEXT')) mudancas.push('produto_cores.imagem_url');
+  if (await adicionarColuna(db, 'produto_cores', 'imagem_url', 'TEXT')) mudancas.push('produto_cores.imagem_url');
 
   // ---------- pedidos: codigo, cliente, desconto e cupom ----------
   // ALTER TABLE do SQLite nao aceita UNIQUE: a unicidade vem do indice abaixo.
-  if (adicionarColuna(db, 'pedidos', 'codigo', 'TEXT')) mudancas.push('pedidos.codigo');
-  if (adicionarColuna(db, 'pedidos', 'cliente_id', 'INTEGER REFERENCES clientes(id)')) mudancas.push('pedidos.cliente_id');
-  if (adicionarColuna(db, 'pedidos', 'valor_desconto', 'REAL NOT NULL DEFAULT 0')) mudancas.push('pedidos.valor_desconto');
-  if (adicionarColuna(db, 'pedidos', 'cupom', 'TEXT')) mudancas.push('pedidos.cupom');
-  if (adicionarColuna(db, 'pedidos', 'valor_final', 'REAL NOT NULL DEFAULT 0')) mudancas.push('pedidos.valor_final');
+  if (await adicionarColuna(db, 'pedidos', 'codigo', 'TEXT')) mudancas.push('pedidos.codigo');
+  if (await adicionarColuna(db, 'pedidos', 'cliente_id', 'INTEGER REFERENCES clientes(id)')) mudancas.push('pedidos.cliente_id');
+  if (await adicionarColuna(db, 'pedidos', 'valor_desconto', 'REAL NOT NULL DEFAULT 0')) mudancas.push('pedidos.valor_desconto');
+  if (await adicionarColuna(db, 'pedidos', 'cupom', 'TEXT')) mudancas.push('pedidos.cupom');
+  if (await adicionarColuna(db, 'pedidos', 'valor_final', 'REAL NOT NULL DEFAULT 0')) mudancas.push('pedidos.valor_final');
 
   // Indices que dependem das colunas acima (por isso ficam aqui, e nao no schema.sql).
-  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pedidos_codigo ON pedidos(codigo) WHERE codigo IS NOT NULL`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_produtos_destaque ON produtos(destaque)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON pedidos(cliente_id)`);
+  await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pedidos_codigo ON pedidos(codigo) WHERE codigo IS NOT NULL`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_produtos_destaque ON produtos(destaque)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_pedidos_cliente ON pedidos(cliente_id)`);
 
   // ---------- status antigos -> novos ----------
-  const atualizarStatus = db.prepare('UPDATE pedidos SET status = ? WHERE status = ?');
   for (const [antigo, novo] of Object.entries(STATUS_ANTIGOS)) {
-    const info = atualizarStatus.run(novo, antigo);
+    const info = await db.prepare('UPDATE pedidos SET status = ? WHERE status = ?').run(novo, antigo);
     if (info.changes > 0) mudancas.push(`${info.changes} pedido(s) ${antigo} -> ${novo}`);
   }
 
   // ---------- valor_final dos pedidos antigos ----------
-  const semFinal = db.prepare('UPDATE pedidos SET valor_final = total WHERE valor_final = 0 AND total > 0').run();
+  const semFinal = await db.prepare('UPDATE pedidos SET valor_final = total WHERE valor_final = 0 AND total > 0').run();
   if (semFinal.changes > 0) mudancas.push(`${semFinal.changes} pedido(s) com valor_final preenchido`);
 
   // ---------- clientes a partir dos pedidos ja existentes ----------
-  const pedidosSemCliente = db.prepare('SELECT * FROM pedidos WHERE cliente_id IS NULL ORDER BY id ASC').all();
+  const pedidosSemCliente = await db.prepare('SELECT * FROM pedidos WHERE cliente_id IS NULL ORDER BY id ASC').all();
   if (pedidosSemCliente.length) {
-    const vincular = db.transaction(() => {
+    const vincular = db.transaction(async (tx) => {
       for (const pedido of pedidosSemCliente) {
-        const cliente = registrarCliente(db, {
+        const cliente = await registrarCliente(tx, {
           nome: pedido.nome_cliente,
           email: pedido.email_cliente,
           telefone: pedido.telefone_cliente
         });
-        if (cliente) db.prepare('UPDATE pedidos SET cliente_id = ? WHERE id = ?').run(cliente.id, pedido.id);
+        if (cliente) await tx.prepare('UPDATE pedidos SET cliente_id = ? WHERE id = ?').run(cliente.id, pedido.id);
       }
     });
-    vincular();
+    await vincular();
     mudancas.push(`${pedidosSemCliente.length} pedido(s) vinculados a clientes`);
   }
 
   // ---------- codigo comercial dos pedidos antigos ----------
-  const semCodigo = db.prepare('SELECT id, criado_em FROM pedidos WHERE codigo IS NULL ORDER BY id ASC').all();
+  const semCodigo = await db.prepare('SELECT id, criado_em FROM pedidos WHERE codigo IS NULL ORDER BY id ASC').all();
   if (semCodigo.length) {
-    const gravar = db.transaction(() => {
+    const gravar = db.transaction(async (tx) => {
       for (const pedido of semCodigo) {
         const ano = (pedido.criado_em || '').slice(0, 4) || String(new Date().getFullYear());
-        db.prepare('UPDATE pedidos SET codigo = ? WHERE id = ?').run(gerarCodigoPedido(db, ano), pedido.id);
+        await tx.prepare('UPDATE pedidos SET codigo = ? WHERE id = ?').run(await gerarCodigoPedido(tx, ano), pedido.id);
       }
     });
-    gravar();
+    await gravar();
     mudancas.push(`${semCodigo.length} pedido(s) com codigo gerado`);
   }
 
@@ -179,48 +187,48 @@ function migrar(db) {
   // Contas que ja existiam antes desta coluna (inclusive o superadmin de
   // bootstrap) nascem confirmadas por padrao — a exigencia vale só a partir
   // daqui, para quem se cadastra pelo formulario público.
-  if (adicionarColuna(db, 'usuarios', 'email_verificado', 'INTEGER NOT NULL DEFAULT 1')) mudancas.push('usuarios.email_verificado');
-  if (adicionarColuna(db, 'usuarios', 'codigo_verificacao', 'TEXT')) mudancas.push('usuarios.codigo_verificacao');
-  if (adicionarColuna(db, 'usuarios', 'codigo_expira_em', 'TEXT')) mudancas.push('usuarios.codigo_expira_em');
-  if (adicionarColuna(db, 'usuarios', 'codigo_enviado_em', 'TEXT')) mudancas.push('usuarios.codigo_enviado_em');
+  if (await adicionarColuna(db, 'usuarios', 'email_verificado', 'INTEGER NOT NULL DEFAULT 1')) mudancas.push('usuarios.email_verificado');
+  if (await adicionarColuna(db, 'usuarios', 'codigo_verificacao', 'TEXT')) mudancas.push('usuarios.codigo_verificacao');
+  if (await adicionarColuna(db, 'usuarios', 'codigo_expira_em', 'TEXT')) mudancas.push('usuarios.codigo_expira_em');
+  if (await adicionarColuna(db, 'usuarios', 'codigo_enviado_em', 'TEXT')) mudancas.push('usuarios.codigo_enviado_em');
 
   // ---------- clientes: CPF (prefill em compras seguintes do mesmo cliente) ----------
-  if (adicionarColuna(db, 'clientes', 'cpf', 'TEXT')) mudancas.push('clientes.cpf');
+  if (await adicionarColuna(db, 'clientes', 'cpf', 'TEXT')) mudancas.push('clientes.cpf');
 
   // ---------- cupons: validade por periodo e/ou por quantidade de usos ----------
-  if (adicionarColuna(db, 'cupons', 'validade_inicio', 'TEXT')) mudancas.push('cupons.validade_inicio');
-  if (adicionarColuna(db, 'cupons', 'limite_usos', 'INTEGER')) mudancas.push('cupons.limite_usos');
-  if (adicionarColuna(db, 'cupons', 'usos_atuais', 'INTEGER NOT NULL DEFAULT 0')) mudancas.push('cupons.usos_atuais');
+  if (await adicionarColuna(db, 'cupons', 'validade_inicio', 'TEXT')) mudancas.push('cupons.validade_inicio');
+  if (await adicionarColuna(db, 'cupons', 'limite_usos', 'INTEGER')) mudancas.push('cupons.limite_usos');
+  if (await adicionarColuna(db, 'cupons', 'usos_atuais', 'INTEGER NOT NULL DEFAULT 0')) mudancas.push('cupons.usos_atuais');
 
   // ---------- pedidos: CPF e enderecos estruturados (nota fiscal) ----------
-  if (adicionarColuna(db, 'pedidos', 'cpf_cliente', 'TEXT')) mudancas.push('pedidos.cpf_cliente');
-  if (adicionarColuna(db, 'pedidos', 'endereco_resid_cep', 'TEXT')) mudancas.push('pedidos.endereco_resid_cep');
-  if (adicionarColuna(db, 'pedidos', 'endereco_resid_logradouro', 'TEXT')) mudancas.push('pedidos.endereco_resid_logradouro');
-  if (adicionarColuna(db, 'pedidos', 'endereco_resid_numero', 'TEXT')) mudancas.push('pedidos.endereco_resid_numero');
-  if (adicionarColuna(db, 'pedidos', 'endereco_resid_complemento', 'TEXT')) mudancas.push('pedidos.endereco_resid_complemento');
-  if (adicionarColuna(db, 'pedidos', 'endereco_resid_bairro', 'TEXT')) mudancas.push('pedidos.endereco_resid_bairro');
-  if (adicionarColuna(db, 'pedidos', 'endereco_resid_cidade', 'TEXT')) mudancas.push('pedidos.endereco_resid_cidade');
-  if (adicionarColuna(db, 'pedidos', 'endereco_resid_uf', 'TEXT')) mudancas.push('pedidos.endereco_resid_uf');
-  if (adicionarColuna(db, 'pedidos', 'entrega_igual_residencial', 'INTEGER NOT NULL DEFAULT 1')) mudancas.push('pedidos.entrega_igual_residencial');
-  if (adicionarColuna(db, 'pedidos', 'endereco_entrega_cep', 'TEXT')) mudancas.push('pedidos.endereco_entrega_cep');
-  if (adicionarColuna(db, 'pedidos', 'endereco_entrega_logradouro', 'TEXT')) mudancas.push('pedidos.endereco_entrega_logradouro');
-  if (adicionarColuna(db, 'pedidos', 'endereco_entrega_numero', 'TEXT')) mudancas.push('pedidos.endereco_entrega_numero');
-  if (adicionarColuna(db, 'pedidos', 'endereco_entrega_complemento', 'TEXT')) mudancas.push('pedidos.endereco_entrega_complemento');
-  if (adicionarColuna(db, 'pedidos', 'endereco_entrega_bairro', 'TEXT')) mudancas.push('pedidos.endereco_entrega_bairro');
-  if (adicionarColuna(db, 'pedidos', 'endereco_entrega_cidade', 'TEXT')) mudancas.push('pedidos.endereco_entrega_cidade');
-  if (adicionarColuna(db, 'pedidos', 'endereco_entrega_uf', 'TEXT')) mudancas.push('pedidos.endereco_entrega_uf');
+  if (await adicionarColuna(db, 'pedidos', 'cpf_cliente', 'TEXT')) mudancas.push('pedidos.cpf_cliente');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_resid_cep', 'TEXT')) mudancas.push('pedidos.endereco_resid_cep');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_resid_logradouro', 'TEXT')) mudancas.push('pedidos.endereco_resid_logradouro');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_resid_numero', 'TEXT')) mudancas.push('pedidos.endereco_resid_numero');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_resid_complemento', 'TEXT')) mudancas.push('pedidos.endereco_resid_complemento');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_resid_bairro', 'TEXT')) mudancas.push('pedidos.endereco_resid_bairro');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_resid_cidade', 'TEXT')) mudancas.push('pedidos.endereco_resid_cidade');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_resid_uf', 'TEXT')) mudancas.push('pedidos.endereco_resid_uf');
+  if (await adicionarColuna(db, 'pedidos', 'entrega_igual_residencial', 'INTEGER NOT NULL DEFAULT 1')) mudancas.push('pedidos.entrega_igual_residencial');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_entrega_cep', 'TEXT')) mudancas.push('pedidos.endereco_entrega_cep');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_entrega_logradouro', 'TEXT')) mudancas.push('pedidos.endereco_entrega_logradouro');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_entrega_numero', 'TEXT')) mudancas.push('pedidos.endereco_entrega_numero');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_entrega_complemento', 'TEXT')) mudancas.push('pedidos.endereco_entrega_complemento');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_entrega_bairro', 'TEXT')) mudancas.push('pedidos.endereco_entrega_bairro');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_entrega_cidade', 'TEXT')) mudancas.push('pedidos.endereco_entrega_cidade');
+  if (await adicionarColuna(db, 'pedidos', 'endereco_entrega_uf', 'TEXT')) mudancas.push('pedidos.endereco_entrega_uf');
 
   // ---------- catalogo: troca de linha de produtos (uma vez so) ----------
-  if (resetarCatalogoAntigo(db)) mudancas.push('catálogo antigo substituído pela nova lista de produtos');
+  if (await resetarCatalogoAntigo(db)) mudancas.push('catálogo antigo substituído pela nova lista de produtos');
 
   // ---------- funil por produto: marca de corte, sem apagar historico ----------
   // "Zerar" o funil (visualizacoes -> carrinho -> venda) sem excluir pedidos ou
   // eventos_analytics: as consultas do relatorio (superadmin.js) passam a
   // contar so o que aconteceu depois desta marca. Roda uma unica vez — se a
   // loja quiser zerar de novo no futuro, basta atualizar este valor na tabela.
-  const jaTemMarca = db.prepare(`SELECT 1 FROM configuracoes WHERE chave = 'funil_reset_em'`).get();
+  const jaTemMarca = await db.prepare(`SELECT 1 FROM configuracoes WHERE chave = 'funil_reset_em'`).get();
   if (!jaTemMarca) {
-    db.prepare(`INSERT INTO configuracoes (chave, valor) VALUES ('funil_reset_em', datetime('now'))`).run();
+    await db.prepare(`INSERT INTO configuracoes (chave, valor) VALUES ('funil_reset_em', datetime('now'))`).run();
     mudancas.push('funil por produto zerado a partir de agora');
   }
 
@@ -229,7 +237,7 @@ function migrar(db) {
 
 // Cria ou reaproveita o cliente. Reaproveita pelo e-mail quando houver;
 // senao, pelo telefone. Mantem o nome/cpf mais recente informado.
-function registrarCliente(db, { nome, email, telefone, cpf }) {
+async function registrarCliente(db, { nome, email, telefone, cpf }) {
   const nomeLimpo = (nome || '').trim();
   const emailLimpo = (email || '').trim().toLowerCase() || null;
   const telefoneLimpo = (telefone || '').trim() || null;
@@ -237,25 +245,25 @@ function registrarCliente(db, { nome, email, telefone, cpf }) {
   if (!nomeLimpo) return null;
 
   let existente = null;
-  if (emailLimpo) existente = db.prepare('SELECT * FROM clientes WHERE email = ?').get(emailLimpo);
-  if (!existente && telefoneLimpo) existente = db.prepare('SELECT * FROM clientes WHERE telefone = ?').get(telefoneLimpo);
+  if (emailLimpo) existente = await db.prepare('SELECT * FROM clientes WHERE email = ?').get(emailLimpo);
+  if (!existente && telefoneLimpo) existente = await db.prepare('SELECT * FROM clientes WHERE telefone = ?').get(telefoneLimpo);
 
   if (existente) {
-    db.prepare('UPDATE clientes SET nome = ?, email = IFNULL(?, email), telefone = IFNULL(?, telefone), cpf = IFNULL(?, cpf) WHERE id = ?')
+    await db.prepare('UPDATE clientes SET nome = ?, email = IFNULL(?, email), telefone = IFNULL(?, telefone), cpf = IFNULL(?, cpf) WHERE id = ?')
       .run(nomeLimpo, emailLimpo, telefoneLimpo, cpfLimpo, existente.id);
     return db.prepare('SELECT * FROM clientes WHERE id = ?').get(existente.id);
   }
 
-  const info = db.prepare('INSERT INTO clientes (nome, email, telefone, cpf) VALUES (?, ?, ?, ?)')
+  const info = await db.prepare('INSERT INTO clientes (nome, email, telefone, cpf) VALUES (?, ?, ?, ?)')
     .run(nomeLimpo, emailLimpo, telefoneLimpo, cpfLimpo);
   return db.prepare('SELECT * FROM clientes WHERE id = ?').get(info.lastInsertRowid);
 }
 
 // Codigo comercial sequencial por ano: ES-2026-0001, ES-2026-0002...
-function gerarCodigoPedido(db, ano) {
+async function gerarCodigoPedido(db, ano) {
   const anoAlvo = String(ano || new Date().getFullYear());
   const prefixo = `ES-${anoAlvo}-`;
-  const ultimo = db.prepare(
+  const ultimo = await db.prepare(
     `SELECT codigo FROM pedidos WHERE codigo LIKE ? ORDER BY codigo DESC LIMIT 1`
   ).get(`${prefixo}%`);
 
@@ -263,7 +271,7 @@ function gerarCodigoPedido(db, ano) {
   // Protecao contra buracos/colisoes: avanca ate achar um codigo livre.
   for (let tentativa = 0; tentativa < 10000; tentativa++) {
     const candidato = prefixo + String(proximo).padStart(4, '0');
-    const ocupado = db.prepare('SELECT 1 FROM pedidos WHERE codigo = ?').get(candidato);
+    const ocupado = await db.prepare('SELECT 1 FROM pedidos WHERE codigo = ?').get(candidato);
     if (!ocupado) return candidato;
     proximo++;
   }

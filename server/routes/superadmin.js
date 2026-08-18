@@ -11,45 +11,45 @@ const { receberImagemSite, URL_BASE_SITE } = require('../middleware/upload');
 router.use(exigirPapel('superadmin'));
 
 // ---------- Custo / preco de produtos (exclusivo superadmin) ----------
-router.put('/produtos/:id/custo', (req, res) => {
-  const produto = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
+router.put('/produtos/:id/custo', async (req, res) => {
+  const produto = await db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
   const { custo, custo_fonte } = req.body || {};
   const novoCusto = Math.max(0, parseFloat(custo));
   if (Number.isNaN(novoCusto)) return res.status(400).json({ erro: 'Custo inválido.' });
 
   const { percentual, preco } = calcularPrecoVenda(novoCusto);
-  db.prepare(`UPDATE produtos SET custo = ?, custo_fonte = ?, percentual_markup = ?, preco_venda = ?, preco_manual = 0, atualizado_em = datetime('now') WHERE id = ?`)
+  await db.prepare(`UPDATE produtos SET custo = ?, custo_fonte = ?, percentual_markup = ?, preco_venda = ?, preco_manual = 0, atualizado_em = datetime('now') WHERE id = ?`)
     .run(novoCusto, custo_fonte || 'tabela', percentual, preco, produto.id);
 
-  db.prepare(`INSERT INTO historico_precos (produto_id, custo_anterior, custo_novo, preco_anterior, preco_novo, alterado_por)
+  await db.prepare(`INSERT INTO historico_precos (produto_id, custo_anterior, custo_novo, preco_anterior, preco_novo, alterado_por)
     VALUES (?, ?, ?, ?, ?, ?)`).run(produto.id, produto.custo, novoCusto, produto.preco_venda, preco, req.session.usuario.email);
 
   res.json({ ok: true, percentual_markup: percentual, preco_venda: preco });
 });
 
-router.put('/produtos/:id/preco', (req, res) => {
-  const produto = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
+router.put('/produtos/:id/preco', async (req, res) => {
+  const produto = await db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
   const { preco_venda } = req.body || {};
   const novoPreco = Math.max(0, parseFloat(preco_venda));
   if (Number.isNaN(novoPreco)) return res.status(400).json({ erro: 'Preço inválido.' });
 
-  db.prepare(`UPDATE produtos SET preco_venda = ?, preco_manual = 1, atualizado_em = datetime('now') WHERE id = ?`).run(novoPreco, produto.id);
-  db.prepare(`INSERT INTO historico_precos (produto_id, custo_anterior, custo_novo, preco_anterior, preco_novo, alterado_por)
+  await db.prepare(`UPDATE produtos SET preco_venda = ?, preco_manual = 1, atualizado_em = datetime('now') WHERE id = ?`).run(novoPreco, produto.id);
+  await db.prepare(`INSERT INTO historico_precos (produto_id, custo_anterior, custo_novo, preco_anterior, preco_novo, alterado_por)
     VALUES (?, ?, ?, ?, ?, ?)`).run(produto.id, produto.custo, produto.custo, produto.preco_venda, novoPreco, req.session.usuario.email);
 
   res.json({ ok: true });
 });
 
 // Preco promocional (oferta na vitrine). Enviar 0 ou vazio remove a promocao.
-router.put('/produtos/:id/promocao', (req, res) => {
-  const produto = db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
+router.put('/produtos/:id/promocao', async (req, res) => {
+  const produto = await db.prepare('SELECT * FROM produtos WHERE id = ?').get(req.params.id);
   if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
 
   const bruto = req.body ? req.body.preco_promocional : null;
   if (bruto === null || bruto === undefined || bruto === '' || parseFloat(bruto) === 0) {
-    db.prepare(`UPDATE produtos SET preco_promocional = NULL, atualizado_em = datetime('now') WHERE id = ?`).run(produto.id);
+    await db.prepare(`UPDATE produtos SET preco_promocional = NULL, atualizado_em = datetime('now') WHERE id = ?`).run(produto.id);
     return res.json({ ok: true, preco_promocional: null });
   }
 
@@ -59,7 +59,7 @@ router.put('/produtos/:id/promocao', (req, res) => {
     return res.status(400).json({ erro: 'O preço promocional precisa ser menor que o preço de venda.' });
   }
 
-  db.prepare(`UPDATE produtos SET preco_promocional = ?, atualizado_em = datetime('now') WHERE id = ?`).run(promocional, produto.id);
+  await db.prepare(`UPDATE produtos SET preco_promocional = ?, atualizado_em = datetime('now') WHERE id = ?`).run(promocional, produto.id);
   res.json({ ok: true, preco_promocional: promocional });
 });
 
@@ -85,7 +85,7 @@ const ARREDONDAMENTOS = {
   inteiro: (v) => Math.max(1, Math.round(v))
 };
 
-router.post('/produtos/reajuste', (req, res) => {
+router.post('/produtos/reajuste', async (req, res) => {
   const { percentual, escopo, categoria_id, ids, arredondamento, ajustar_promocional, simular } = req.body || {};
 
   const pct = parseFloat(percentual);
@@ -115,7 +115,7 @@ router.post('/produtos/reajuste', (req, res) => {
     return res.status(400).json({ erro: 'Escopo inválido. Use "todos", "categoria" ou "selecao".' });
   }
 
-  const produtos = db.prepare(`
+  const produtos = await db.prepare(`
     SELECT p.*, c.nome AS categoria_nome
     FROM produtos p JOIN categorias c ON c.id = p.categoria_id
     ${filtro}
@@ -175,30 +175,30 @@ router.post('/produtos/reajuste', (req, res) => {
   }
 
   if (!simular && itens.length) {
-    const gravar = db.transaction(() => {
+    const gravar = db.transaction(async (tx) => {
       // preco_manual = 1 nas duas bases: o valor passou a vir de um percentual
       // escolhido na hora, e nao da tabela de markup por faixa de custo — um
       // recalculo futuro nao pode atropelar o reajuste.
       // Na base 'custo' o percentual_markup passa a refletir o markup aplicado.
       const atualizar = base === 'custo'
-        ? db.prepare(`UPDATE produtos
+        ? tx.prepare(`UPDATE produtos
             SET preco_venda = ?, preco_promocional = ?, percentual_markup = ?, preco_manual = 1, atualizado_em = datetime('now')
             WHERE id = ?`)
-        : db.prepare(`UPDATE produtos
+        : tx.prepare(`UPDATE produtos
             SET preco_venda = ?, preco_promocional = ?, preco_manual = 1, atualizado_em = datetime('now')
             WHERE id = ?`);
-      const historiar = db.prepare(`INSERT INTO historico_precos
+      const historiar = tx.prepare(`INSERT INTO historico_precos
         (produto_id, custo_anterior, custo_novo, preco_anterior, preco_novo, alterado_por)
         VALUES (?, ?, ?, ?, ?, ?)`);
       const origem = base === 'custo' ? 'sobre o custo' : 'sobre a venda';
       for (const it of itens) {
-        if (base === 'custo') atualizar.run(it.preco_novo, it.promocional_novo, pct / 100, it.id);
-        else atualizar.run(it.preco_novo, it.promocional_novo, it.id);
-        historiar.run(it.id, it.custo, it.custo, it.preco_anterior, it.preco_novo,
+        if (base === 'custo') await atualizar.run(it.preco_novo, it.promocional_novo, pct / 100, it.id);
+        else await atualizar.run(it.preco_novo, it.promocional_novo, it.id);
+        await historiar.run(it.id, it.custo, it.custo, it.preco_anterior, it.preco_novo,
           `${req.session.usuario.email} (reajuste ${pct > 0 ? '+' : ''}${pct}% ${origem})`);
       }
     });
-    gravar();
+    await gravar();
   }
 
   res.json({
@@ -219,8 +219,8 @@ router.post('/produtos/reajuste', (req, res) => {
 router.get('/permissoes', (req, res) => res.json(PERMISSOES));
 
 // Substitui o conjunto de permissoes do usuario pelo que veio no corpo.
-router.put('/usuarios/:id/permissoes', (req, res) => {
-  const usuario = db.prepare('SELECT id, papel FROM usuarios WHERE id = ?').get(req.params.id);
+router.put('/usuarios/:id/permissoes', async (req, res) => {
+  const usuario = await db.prepare('SELECT id, papel FROM usuarios WHERE id = ?').get(req.params.id);
   if (!usuario) return res.status(404).json({ erro: 'Usuário não encontrado.' });
   if (usuario.papel === 'superadmin') {
     return res.status(400).json({ erro: 'O superadmin já tem todas as permissões — não há o que conceder.' });
@@ -233,48 +233,48 @@ router.put('/usuarios/:id/permissoes', (req, res) => {
   }
 
   const concedidas = normalizarPermissoes(req.body.permissoes);
-  const gravar = db.transaction(() => {
-    db.prepare('DELETE FROM usuario_permissoes WHERE usuario_id = ?').run(usuario.id);
-    const ins = db.prepare('INSERT INTO usuario_permissoes (usuario_id, permissao, concedido_por) VALUES (?, ?, ?)');
-    concedidas.forEach(p => ins.run(usuario.id, p, req.session.usuario.email));
+  const gravar = db.transaction(async (tx) => {
+    await tx.prepare('DELETE FROM usuario_permissoes WHERE usuario_id = ?').run(usuario.id);
+    const ins = tx.prepare('INSERT INTO usuario_permissoes (usuario_id, permissao, concedido_por) VALUES (?, ?, ?)');
+    for (const p of concedidas) await ins.run(usuario.id, p, req.session.usuario.email);
   });
-  gravar();
+  await gravar();
 
   res.json({ ok: true, permissoes: concedidas });
 });
 
 // ---------- Gestao de usuarios admin/superadmin ----------
-router.get('/usuarios', (req, res) => {
-  const usuarios = db.prepare(`SELECT id, nome, email, telefone, papel, ativo, criado_em FROM usuarios WHERE papel IN ('admin','superadmin') ORDER BY criado_em DESC`).all();
-  res.json(usuarios.map(u => ({ ...u, permissoes: permissoesDe(u) })));
+router.get('/usuarios', async (req, res) => {
+  const usuarios = await db.prepare(`SELECT id, nome, email, telefone, papel, ativo, criado_em FROM usuarios WHERE papel IN ('admin','superadmin') ORDER BY criado_em DESC`).all();
+  res.json(await Promise.all(usuarios.map(async u => ({ ...u, permissoes: await permissoesDe(u) }))));
 });
 
-router.post('/usuarios', (req, res) => {
+router.post('/usuarios', async (req, res) => {
   const { nome, email, senha, telefone } = req.body || {};
   if (!nome || !email || !senha) return res.status(400).json({ erro: 'Nome, e-mail e senha são obrigatórios.' });
-  const existente = db.prepare('SELECT id FROM usuarios WHERE email = ?').get(email.toLowerCase().trim());
+  const existente = await db.prepare('SELECT id FROM usuarios WHERE email = ?').get(email.toLowerCase().trim());
   if (existente) return res.status(409).json({ erro: 'Já existe uma conta com este e-mail.' });
   const hash = bcrypt.hashSync(senha, 10);
 
   // As permissoes marcadas na hora de liberar o acesso entram junto com o cadastro.
   const concedidas = normalizarPermissoes((req.body || {}).permissoes);
-  const criar = db.transaction(() => {
-    const info = db.prepare(`INSERT INTO usuarios (nome, email, senha_hash, telefone, papel, ativo) VALUES (?, ?, ?, ?, 'admin', 1)`)
+  const criar = db.transaction(async (tx) => {
+    const info = await tx.prepare(`INSERT INTO usuarios (nome, email, senha_hash, telefone, papel, ativo) VALUES (?, ?, ?, ?, 'admin', 1)`)
       .run(nome.trim(), email.toLowerCase().trim(), hash, telefone || null);
-    const ins = db.prepare('INSERT INTO usuario_permissoes (usuario_id, permissao, concedido_por) VALUES (?, ?, ?)');
-    concedidas.forEach(p => ins.run(info.lastInsertRowid, p, req.session.usuario.email));
+    const ins = tx.prepare('INSERT INTO usuario_permissoes (usuario_id, permissao, concedido_por) VALUES (?, ?, ?)');
+    for (const p of concedidas) await ins.run(info.lastInsertRowid, p, req.session.usuario.email);
     return info.lastInsertRowid;
   });
 
-  res.status(201).json({ id: criar(), permissoes: concedidas });
+  res.status(201).json({ id: await criar(), permissoes: concedidas });
 });
 
-router.put('/usuarios/:id/ativo', (req, res) => {
+router.put('/usuarios/:id/ativo', async (req, res) => {
   const { ativo } = req.body || {};
-  const usuario = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(req.params.id);
+  const usuario = await db.prepare('SELECT * FROM usuarios WHERE id = ?').get(req.params.id);
   if (!usuario) return res.status(404).json({ erro: 'Usuário não encontrado.' });
   if (usuario.papel === 'superadmin') return res.status(400).json({ erro: 'Não é possível desativar um superadmin.' });
-  db.prepare('UPDATE usuarios SET ativo = ? WHERE id = ?').run(ativo ? 1 : 0, usuario.id);
+  await db.prepare('UPDATE usuarios SET ativo = ? WHERE id = ?').run(ativo ? 1 : 0, usuario.id);
   res.json({ ok: true });
 });
 
@@ -282,17 +282,17 @@ router.put('/usuarios/:id/ativo', (req, res) => {
 // Sem produtos vinculados = cupom vale para o carrinho inteiro ("nenhum" produto
 // especifico restringindo, ou "todos" — dá no mesmo resultado). Com produtos
 // vinculados, o desconto so' incide sobre os itens daquela lista.
-function cupomComProdutos(cupom) {
-  const produtos = db.prepare(`
+async function cupomComProdutos(cupom) {
+  const produtos = await db.prepare(`
     SELECT p.id, p.nome FROM cupom_produtos cp JOIN produtos p ON p.id = cp.produto_id
     WHERE cp.cupom_id = ? ORDER BY p.nome ASC
   `).all(cupom.id);
   return { ...cupom, produtos };
 }
 
-router.get('/cupons', (req, res) => {
-  const cupons = db.prepare('SELECT * FROM cupons ORDER BY ativo DESC, criado_em DESC').all();
-  res.json(cupons.map(cupomComProdutos));
+router.get('/cupons', async (req, res) => {
+  const cupons = await db.prepare('SELECT * FROM cupons ORDER BY ativo DESC, criado_em DESC').all();
+  res.json(await Promise.all(cupons.map(cupomComProdutos)));
 });
 
 // Valida os campos comuns ao criar/editar. Devolve {erro} OU os valores prontos para gravar.
@@ -324,74 +324,74 @@ function validarCamposCupom(body) {
   return { codigoLimpo, tipo, valorNumero, inicio, fim, limiteUsosNumero, produtosIds };
 }
 
-router.post('/cupons', (req, res) => {
+router.post('/cupons', async (req, res) => {
   const v = validarCamposCupom(req.body);
   if (v.erro) return res.status(400).json(v);
 
-  const existente = db.prepare('SELECT id FROM cupons WHERE UPPER(codigo) = ?').get(v.codigoLimpo);
+  const existente = await db.prepare('SELECT id FROM cupons WHERE UPPER(codigo) = ?').get(v.codigoLimpo);
   if (existente) return res.status(409).json({ erro: 'Já existe um cupom com este código.' });
 
-  const criar = db.transaction(() => {
-    const info = db.prepare(`INSERT INTO cupons (codigo, tipo, valor, validade_inicio, validade, limite_usos, ativo)
+  const criar = db.transaction(async (tx) => {
+    const info = await tx.prepare(`INSERT INTO cupons (codigo, tipo, valor, validade_inicio, validade, limite_usos, ativo)
       VALUES (?, ?, ?, ?, ?, ?, 1)`).run(v.codigoLimpo, v.tipo, v.valorNumero, v.inicio, v.fim, v.limiteUsosNumero);
-    const ins = db.prepare('INSERT INTO cupom_produtos (cupom_id, produto_id) VALUES (?, ?)');
-    v.produtosIds.forEach(pid => ins.run(info.lastInsertRowid, pid));
+    const ins = tx.prepare('INSERT INTO cupom_produtos (cupom_id, produto_id) VALUES (?, ?)');
+    for (const pid of v.produtosIds) await ins.run(info.lastInsertRowid, pid);
     return info.lastInsertRowid;
   });
 
-  res.status(201).json({ id: criar() });
+  res.status(201).json({ id: await criar() });
 });
 
-router.put('/cupons/:id', (req, res) => {
-  const cupom = db.prepare('SELECT * FROM cupons WHERE id = ?').get(req.params.id);
+router.put('/cupons/:id', async (req, res) => {
+  const cupom = await db.prepare('SELECT * FROM cupons WHERE id = ?').get(req.params.id);
   if (!cupom) return res.status(404).json({ erro: 'Cupom não encontrado.' });
 
   const v = validarCamposCupom(req.body);
   if (v.erro) return res.status(400).json(v);
 
-  const conflito = db.prepare('SELECT id FROM cupons WHERE UPPER(codigo) = ? AND id != ?').get(v.codigoLimpo, cupom.id);
+  const conflito = await db.prepare('SELECT id FROM cupons WHERE UPPER(codigo) = ? AND id != ?').get(v.codigoLimpo, cupom.id);
   if (conflito) return res.status(409).json({ erro: 'Já existe outro cupom com este código.' });
 
-  const gravar = db.transaction(() => {
-    db.prepare(`UPDATE cupons SET codigo = ?, tipo = ?, valor = ?, validade_inicio = ?, validade = ?, limite_usos = ? WHERE id = ?`)
+  const gravar = db.transaction(async (tx) => {
+    await tx.prepare(`UPDATE cupons SET codigo = ?, tipo = ?, valor = ?, validade_inicio = ?, validade = ?, limite_usos = ? WHERE id = ?`)
       .run(v.codigoLimpo, v.tipo, v.valorNumero, v.inicio, v.fim, v.limiteUsosNumero, cupom.id);
-    db.prepare('DELETE FROM cupom_produtos WHERE cupom_id = ?').run(cupom.id);
-    const ins = db.prepare('INSERT INTO cupom_produtos (cupom_id, produto_id) VALUES (?, ?)');
-    v.produtosIds.forEach(pid => ins.run(cupom.id, pid));
+    await tx.prepare('DELETE FROM cupom_produtos WHERE cupom_id = ?').run(cupom.id);
+    const ins = tx.prepare('INSERT INTO cupom_produtos (cupom_id, produto_id) VALUES (?, ?)');
+    for (const pid of v.produtosIds) await ins.run(cupom.id, pid);
   });
-  gravar();
+  await gravar();
 
   res.json({ ok: true });
 });
 
-router.put('/cupons/:id/ativo', (req, res) => {
+router.put('/cupons/:id/ativo', async (req, res) => {
   const { ativo } = req.body || {};
-  db.prepare('UPDATE cupons SET ativo = ? WHERE id = ?').run(ativo ? 1 : 0, req.params.id);
+  await db.prepare('UPDATE cupons SET ativo = ? WHERE id = ?').run(ativo ? 1 : 0, req.params.id);
   res.json({ ok: true });
 });
 
 // ---------- Configurações do site (contato, redes sociais, logomarca) ----------
-router.get('/site', (req, res) => {
-  res.json(obterLoja());
+router.get('/site', async (req, res) => {
+  res.json(await obterLoja());
 });
 
-router.put('/site', (req, res) => {
+router.put('/site', async (req, res) => {
   const { telefone, whatsapp, instagram, email } = req.body || {};
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) {
     return res.status(400).json({ erro: 'Informe um e-mail válido (ou deixe em branco).' });
   }
-  res.json(salvarContato({ telefone, whatsapp, instagram, email }));
+  res.json(await salvarContato({ telefone, whatsapp, instagram, email }));
 });
 
-router.post('/site/logo', receberImagemSite, (req, res) => {
+router.post('/site/logo', receberImagemSite, async (req, res) => {
   if (!req.file) return res.status(400).json({ erro: 'Nenhuma imagem foi enviada.' });
   const logoUrl = `${URL_BASE_SITE}/${req.file.filename}`;
-  res.status(201).json(salvarLogo(logoUrl));
+  res.status(201).json(await salvarLogo(logoUrl));
 });
 
 // ---------- Avisos (banners com período de exibição) ----------
-router.get('/avisos', (req, res) => {
-  res.json(db.prepare('SELECT * FROM avisos ORDER BY criado_em DESC').all());
+router.get('/avisos', async (req, res) => {
+  res.json(await db.prepare('SELECT * FROM avisos ORDER BY criado_em DESC').all());
 });
 
 function validarCamposAviso(body) {
@@ -406,35 +406,35 @@ function validarCamposAviso(body) {
   return { tituloLimpo, mensagemLimpa: String(mensagem || '').trim() || null, inicio, fim };
 }
 
-router.post('/avisos', (req, res) => {
+router.post('/avisos', async (req, res) => {
   const v = validarCamposAviso(req.body);
   if (v.erro) return res.status(400).json(v);
 
-  const info = db.prepare(`INSERT INTO avisos (titulo, mensagem, data_inicio, data_fim, ativo) VALUES (?, ?, ?, ?, 1)`)
+  const info = await db.prepare(`INSERT INTO avisos (titulo, mensagem, data_inicio, data_fim, ativo) VALUES (?, ?, ?, ?, 1)`)
     .run(v.tituloLimpo, v.mensagemLimpa, v.inicio, v.fim);
   res.status(201).json({ id: info.lastInsertRowid });
 });
 
-router.put('/avisos/:id', (req, res) => {
-  const aviso = db.prepare('SELECT id FROM avisos WHERE id = ?').get(req.params.id);
+router.put('/avisos/:id', async (req, res) => {
+  const aviso = await db.prepare('SELECT id FROM avisos WHERE id = ?').get(req.params.id);
   if (!aviso) return res.status(404).json({ erro: 'Aviso não encontrado.' });
 
   const v = validarCamposAviso(req.body);
   if (v.erro) return res.status(400).json(v);
 
-  db.prepare(`UPDATE avisos SET titulo = ?, mensagem = ?, data_inicio = ?, data_fim = ? WHERE id = ?`)
+  await db.prepare(`UPDATE avisos SET titulo = ?, mensagem = ?, data_inicio = ?, data_fim = ? WHERE id = ?`)
     .run(v.tituloLimpo, v.mensagemLimpa, v.inicio, v.fim, aviso.id);
   res.json({ ok: true });
 });
 
-router.put('/avisos/:id/ativo', (req, res) => {
+router.put('/avisos/:id/ativo', async (req, res) => {
   const { ativo } = req.body || {};
-  db.prepare('UPDATE avisos SET ativo = ? WHERE id = ?').run(ativo ? 1 : 0, req.params.id);
+  await db.prepare('UPDATE avisos SET ativo = ? WHERE id = ?').run(ativo ? 1 : 0, req.params.id);
   res.json({ ok: true });
 });
 
-router.delete('/avisos/:id', (req, res) => {
-  const info = db.prepare('DELETE FROM avisos WHERE id = ?').run(req.params.id);
+router.delete('/avisos/:id', async (req, res) => {
+  const info = await db.prepare('DELETE FROM avisos WHERE id = ?').run(req.params.id);
   if (!info.changes) return res.status(404).json({ erro: 'Aviso não encontrado.' });
   res.json({ ok: true });
 });
@@ -450,35 +450,35 @@ function gerarSlugLinha(texto) {
     .replace(/^-+|-+$/g, '');
 }
 
-router.get('/linhas', (req, res) => {
-  const linhas = db.prepare(`
+router.get('/linhas', async (req, res) => {
+  const linhas = await db.prepare(`
     SELECT l.*, (SELECT COUNT(*) FROM produto_linhas pl WHERE pl.linha_id = l.id) AS total_produtos
     FROM linhas l ORDER BY l.ordem ASC
   `).all();
   res.json(linhas);
 });
 
-router.post('/linhas', (req, res) => {
+router.post('/linhas', async (req, res) => {
   const { nome, ordem } = req.body || {};
   const nomeLimpo = String(nome || '').trim();
   if (!nomeLimpo) return res.status(400).json({ erro: 'Informe o nome da linha.' });
   const slug = gerarSlugLinha(nomeLimpo);
   if (!slug) return res.status(400).json({ erro: 'O nome precisa ter ao menos uma letra ou número.' });
 
-  const existente = db.prepare('SELECT id FROM linhas WHERE nome = ? COLLATE NOCASE OR slug = ?').get(nomeLimpo, slug);
+  const existente = await db.prepare('SELECT id FROM linhas WHERE nome = ? COLLATE NOCASE OR slug = ?').get(nomeLimpo, slug);
   if (existente) return res.status(409).json({ erro: 'Já existe uma linha com esse nome.' });
 
   const ordemInformada = parseInt(ordem, 10);
   const ordemFinal = Number.isInteger(ordemInformada)
     ? ordemInformada
-    : (db.prepare('SELECT COALESCE(MAX(ordem), 0) + 1 AS proxima FROM linhas').get().proxima);
+    : (await db.prepare('SELECT COALESCE(MAX(ordem), 0) + 1 AS proxima FROM linhas').get()).proxima;
 
-  const info = db.prepare('INSERT INTO linhas (nome, slug, ordem) VALUES (?, ?, ?)').run(nomeLimpo, slug, ordemFinal);
+  const info = await db.prepare('INSERT INTO linhas (nome, slug, ordem) VALUES (?, ?, ?)').run(nomeLimpo, slug, ordemFinal);
   res.status(201).json({ id: info.lastInsertRowid, slug });
 });
 
-router.put('/linhas/:id', (req, res) => {
-  const linha = db.prepare('SELECT * FROM linhas WHERE id = ?').get(req.params.id);
+router.put('/linhas/:id', async (req, res) => {
+  const linha = await db.prepare('SELECT * FROM linhas WHERE id = ?').get(req.params.id);
   if (!linha) return res.status(404).json({ erro: 'Linha não encontrada.' });
 
   const { nome, ordem } = req.body || {};
@@ -487,35 +487,35 @@ router.put('/linhas/:id', (req, res) => {
   const slug = nome !== undefined ? gerarSlugLinha(nomeLimpo) : linha.slug;
   if (!slug) return res.status(400).json({ erro: 'O nome precisa ter ao menos uma letra ou número.' });
 
-  const conflito = db.prepare('SELECT id FROM linhas WHERE (nome = ? COLLATE NOCASE OR slug = ?) AND id != ?').get(nomeLimpo, slug, linha.id);
+  const conflito = await db.prepare('SELECT id FROM linhas WHERE (nome = ? COLLATE NOCASE OR slug = ?) AND id != ?').get(nomeLimpo, slug, linha.id);
   if (conflito) return res.status(409).json({ erro: 'Já existe outra linha com esse nome.' });
 
   const ordemInformada = parseInt(ordem, 10);
-  db.prepare('UPDATE linhas SET nome = ?, slug = ?, ordem = ? WHERE id = ?')
+  await db.prepare('UPDATE linhas SET nome = ?, slug = ?, ordem = ? WHERE id = ?')
     .run(nomeLimpo, slug, Number.isInteger(ordemInformada) ? ordemInformada : linha.ordem, linha.id);
   res.json({ ok: true, slug });
 });
 
-router.delete('/linhas/:id', (req, res) => {
-  const info = db.prepare('DELETE FROM linhas WHERE id = ?').run(req.params.id);
+router.delete('/linhas/:id', async (req, res) => {
+  const info = await db.prepare('DELETE FROM linhas WHERE id = ?').run(req.params.id);
   if (!info.changes) return res.status(404).json({ erro: 'Linha não encontrada.' });
   res.json({ ok: true });
 });
 
 // ---------- Relatorios ----------
-router.get('/relatorios/resumo', (req, res) => {
-  const totalProdutos = db.prepare('SELECT COUNT(*) n FROM produtos WHERE ativo = 1').get().n;
-  const totalPedidos = db.prepare(`SELECT COUNT(*) n FROM pedidos`).get().n;
+router.get('/relatorios/resumo', async (req, res) => {
+  const totalProdutos = (await db.prepare('SELECT COUNT(*) n FROM produtos WHERE ativo = 1').get()).n;
+  const totalPedidos = (await db.prepare(`SELECT COUNT(*) n FROM pedidos`).get()).n;
   // Faturamento usa valor_final: e' o que o cliente realmente pagou (ja com cupom).
-  const faturamento = db.prepare(`SELECT IFNULL(SUM(valor_final),0) v FROM pedidos WHERE status IN ('pago','enviado','recebido','finalizado')`).get().v;
-  const custoVendido = db.prepare(`
+  const faturamento = (await db.prepare(`SELECT IFNULL(SUM(valor_final),0) v FROM pedidos WHERE status IN ('pago','enviado','recebido','finalizado')`).get()).v;
+  const custoVendido = (await db.prepare(`
     SELECT IFNULL(SUM(pi.custo_unitario * pi.quantidade),0) v
     FROM pedido_itens pi JOIN pedidos p ON p.id = pi.pedido_id
     WHERE p.status IN ('pago','enviado','recebido','finalizado')
-  `).get().v;
-  const carrinhosAbertos = db.prepare(`SELECT COUNT(*) n FROM carrinhos WHERE status = 'aberto'`).get().n;
-  const agendamentosPendentes = db.prepare(`SELECT COUNT(*) n FROM agendamentos WHERE status = 'pendente'`).get().n;
-  const encomendasAbertas = db.prepare(`SELECT COUNT(*) n FROM encomendas WHERE status = 'aguardando'`).get().n;
+  `).get()).v;
+  const carrinhosAbertos = (await db.prepare(`SELECT COUNT(*) n FROM carrinhos WHERE status = 'aberto'`).get()).n;
+  const agendamentosPendentes = (await db.prepare(`SELECT COUNT(*) n FROM agendamentos WHERE status = 'pendente'`).get()).n;
+  const encomendasAbertas = (await db.prepare(`SELECT COUNT(*) n FROM encomendas WHERE status = 'aguardando'`).get()).n;
 
   res.json({
     total_produtos: totalProdutos,
@@ -529,8 +529,8 @@ router.get('/relatorios/resumo', (req, res) => {
 });
 
 // Produtos mais colocados no carrinho mas sem compra finalizada (abandono)
-router.get('/relatorios/carrinho-abandonado', (req, res) => {
-  const rows = db.prepare(`
+router.get('/relatorios/carrinho-abandonado', async (req, res) => {
+  const rows = await db.prepare(`
     SELECT p.id, p.nome, p.preco_venda, COUNT(*) AS vezes_no_carrinho, SUM(ci.quantidade) AS unidades_no_carrinho
     FROM carrinho_itens ci
     JOIN carrinhos c ON c.id = ci.carrinho_id
@@ -544,8 +544,8 @@ router.get('/relatorios/carrinho-abandonado', (req, res) => {
 });
 
 // Produtos mais vendidos (por unidades, em pedidos pagos/concluidos)
-router.get('/relatorios/mais-vendidos', (req, res) => {
-  const rows = db.prepare(`
+router.get('/relatorios/mais-vendidos', async (req, res) => {
+  const rows = await db.prepare(`
     SELECT pi.produto_id AS id, pi.nome_produto AS nome, SUM(pi.quantidade) AS unidades_vendidas,
            SUM(pi.preco_unitario * pi.quantidade) AS receita
     FROM pedido_itens pi JOIN pedidos p ON p.id = pi.pedido_id
@@ -558,8 +558,8 @@ router.get('/relatorios/mais-vendidos', (req, res) => {
 });
 
 // Produtos mais rentaveis (maior lucro total = (preco-custo)*quantidade vendida)
-router.get('/relatorios/mais-rentaveis', (req, res) => {
-  const rows = db.prepare(`
+router.get('/relatorios/mais-rentaveis', async (req, res) => {
+  const rows = await db.prepare(`
     SELECT pi.produto_id AS id, pi.nome_produto AS nome,
            SUM(pi.quantidade) AS unidades_vendidas,
            SUM((pi.preco_unitario - pi.custo_unitario) * pi.quantidade) AS lucro_total,
@@ -578,10 +578,10 @@ router.get('/relatorios/mais-rentaveis', (req, res) => {
 // db/migrate.js) — assim o funil comeca zerado a partir da publicacao da
 // loja, sem apagar eventos_analytics nem pedidos (que os outros relatorios
 // desta pagina continuam usando por inteiro).
-router.get('/relatorios/funil-produtos', (req, res) => {
-  const corte = db.prepare(`SELECT valor FROM configuracoes WHERE chave = 'funil_reset_em'`).get();
+router.get('/relatorios/funil-produtos', async (req, res) => {
+  const corte = await db.prepare(`SELECT valor FROM configuracoes WHERE chave = 'funil_reset_em'`).get();
   const desde = corte ? corte.valor : '0000-01-01';
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT p.id, p.nome,
       (SELECT COUNT(*) FROM eventos_analytics e WHERE e.produto_id = p.id AND e.tipo = 'view_produto' AND e.criado_em > ?) AS visualizacoes,
       (SELECT COUNT(*) FROM eventos_analytics e WHERE e.produto_id = p.id AND e.tipo = 'add_carrinho' AND e.criado_em > ?) AS adicoes_carrinho,
@@ -594,8 +594,8 @@ router.get('/relatorios/funil-produtos', (req, res) => {
   res.json(rows);
 });
 
-router.get('/relatorios/vendas-por-dia', (req, res) => {
-  const rows = db.prepare(`
+router.get('/relatorios/vendas-por-dia', async (req, res) => {
+  const rows = await db.prepare(`
     SELECT date(criado_em) AS dia, COUNT(*) AS pedidos, SUM(valor_final) AS total
     FROM pedidos WHERE status IN ('pago','enviado','recebido','finalizado')
     GROUP BY date(criado_em) ORDER BY dia DESC LIMIT 30

@@ -14,7 +14,7 @@ router.post('/webhook', async (req, res) => {
     if (!pagamentoInfo) return res.sendStatus(200);
 
     const pedidoId = pagamentoInfo.external_reference;
-    const pedido = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedidoId);
+    const pedido = await db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedidoId);
     if (!pedido) return res.sendStatus(200);
 
     let novoStatus = pedido.status;
@@ -22,17 +22,17 @@ router.post('/webhook', async (req, res) => {
     else if (pagamentoInfo.status === 'rejected') novoStatus = 'cancelado';
     else if (pagamentoInfo.status === 'pending' || pagamentoInfo.status === 'in_process') novoStatus = 'aguardando_pagamento';
 
-    db.prepare(`UPDATE pedidos SET status = ?, mp_payment_id = ?, atualizado_em = datetime('now') WHERE id = ?`)
+    await db.prepare(`UPDATE pedidos SET status = ?, mp_payment_id = ?, atualizado_em = datetime('now') WHERE id = ?`)
       .run(novoStatus, String(paymentId), pedidoId);
 
     if (novoStatus === 'pago' && pedido.status !== 'pago') {
-      const itens = db.prepare('SELECT * FROM pedido_itens WHERE pedido_id = ?').all(pedidoId);
+      const itens = await db.prepare('SELECT * FROM pedido_itens WHERE pedido_id = ?').all(pedidoId);
       for (const item of itens) {
         if (!item.produto_id) continue;
-        db.prepare(`UPDATE produto_estoque SET quantidade = MAX(0, quantidade - ?)
+        await db.prepare(`UPDATE produto_estoque SET quantidade = MAX(0, quantidade - ?)
           WHERE produto_id = ? AND IFNULL(tamanho,'') = IFNULL(?,'') AND IFNULL(cor,'') = IFNULL(?,'')`)
           .run(item.quantidade, item.produto_id, item.tamanho, item.cor);
-        db.prepare(`INSERT INTO eventos_analytics (tipo, produto_id) VALUES ('compra_concluida', ?)`).run(item.produto_id);
+        await db.prepare(`INSERT INTO eventos_analytics (tipo, produto_id) VALUES ('compra_concluida', ?)`).run(item.produto_id);
       }
     }
 
@@ -44,8 +44,8 @@ router.post('/webhook', async (req, res) => {
 });
 
 // Endpoint auxiliar para a pagina de confirmacao consultar o status do pedido.
-router.get('/status/:pedidoId', (req, res) => {
-  const pedido = db.prepare(`SELECT id, codigo, status, total, valor_desconto, cupom, valor_final, forma_pagamento
+router.get('/status/:pedidoId', async (req, res) => {
+  const pedido = await db.prepare(`SELECT id, codigo, status, total, valor_desconto, cupom, valor_final, forma_pagamento
     FROM pedidos WHERE id = ?`).get(req.params.pedidoId);
   if (!pedido) return res.status(404).json({ erro: 'Pedido não encontrado.' });
   res.json(pedido);

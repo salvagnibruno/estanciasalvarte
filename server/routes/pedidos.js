@@ -64,23 +64,23 @@ router.post('/checkout', async (req, res) => {
     entrega = endereco_entrega;
   }
 
-  const carrinho = obterCarrinhoAtual(req);
-  const { itens, total } = montarRespostaCarrinho(carrinho);
+  const carrinho = await obterCarrinhoAtual(req);
+  const { itens, total } = await montarRespostaCarrinho(carrinho);
   if (itens.length === 0) return res.status(400).json({ erro: 'Seu carrinho está vazio.' });
 
   // O desconto e' sempre recalculado aqui, a partir dos itens de verdade: o
   // valor que veio da tela nao e' confiavel.
-  const resultadoCupom = cupom ? avaliarCupom(cupom, itens) : null;
+  const resultadoCupom = cupom ? await avaliarCupom(cupom, itens) : null;
   const valorDesconto = resultadoCupom && resultadoCupom.valido ? resultadoCupom.desconto : 0;
   const cupomAplicado = resultadoCupom && resultadoCupom.valido ? resultadoCupom.codigo : null;
   const valorFinal = Math.round((total - valorDesconto) * 100) / 100;
 
   const usuarioId = req.session.usuario ? req.session.usuario.id : null;
   const cpfLimpo = somenteDigitos(cpf_cliente);
-  const cliente = registrarCliente(db, { nome: nome_cliente, email: email_cliente, telefone: telefone_cliente, cpf: cpfLimpo });
-  const codigo = gerarCodigoPedido(db, new Date().getFullYear());
+  const cliente = await registrarCliente(db, { nome: nome_cliente, email: email_cliente, telefone: telefone_cliente, cpf: cpfLimpo });
+  const codigo = await gerarCodigoPedido(db, new Date().getFullYear());
 
-  const info = db.prepare(`INSERT INTO pedidos
+  const info = await db.prepare(`INSERT INTO pedidos
     (codigo, usuario_id, cliente_id, nome_cliente, email_cliente, telefone_cliente, cpf_cliente,
      endereco_resid_cep, endereco_resid_logradouro, endereco_resid_numero, endereco_resid_complemento,
      endereco_resid_bairro, endereco_resid_cidade, endereco_resid_uf, entrega_igual_residencial,
@@ -110,23 +110,23 @@ router.post('/checkout', async (req, res) => {
   const insItem = db.prepare(`INSERT INTO pedido_itens (pedido_id, produto_id, nome_produto, tamanho, cor, quantidade, preco_unitario, custo_unitario)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
   for (const item of itens) {
-    const produto = db.prepare('SELECT custo FROM produtos WHERE id = ?').get(item.produto_id);
-    insItem.run(pedidoId, item.produto_id, item.produto_nome, item.tamanho, item.cor, item.quantidade, item.preco_unitario, produto ? produto.custo : 0);
+    const produto = await db.prepare('SELECT custo FROM produtos WHERE id = ?').get(item.produto_id);
+    await insItem.run(pedidoId, item.produto_id, item.produto_nome, item.tamanho, item.cor, item.quantidade, item.preco_unitario, produto ? produto.custo : 0);
   }
 
-  if (cupomAplicado) registrarUsoCupom(cupomAplicado);
+  if (cupomAplicado) await registrarUsoCupom(cupomAplicado);
 
-  db.prepare(`UPDATE carrinhos SET status = 'convertido' WHERE id = ?`).run(carrinho.id);
-  db.prepare(`INSERT INTO eventos_analytics (tipo, usuario_id, sessao_id) VALUES ('checkout_iniciado', ?, ?)`)
-    .run(usuarioId, req.sessionID);
+  await db.prepare(`UPDATE carrinhos SET status = 'convertido' WHERE id = ?`).run(carrinho.id);
+  await db.prepare(`INSERT INTO eventos_analytics (tipo, usuario_id, sessao_id) VALUES ('checkout_iniciado', ?, ?)`)
+    .run(usuarioId, req.session.sid);
 
-  const pedido = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedidoId);
+  const pedido = await db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedidoId);
 
   if (forma_pagamento !== 'combinar' && pagamento.configurado()) {
     try {
       const baseUrl = `${req.protocol}://${req.get('host')}`;
       const preferencia = await pagamento.criarPreferencia(pedido, itens, baseUrl);
-      db.prepare('UPDATE pedidos SET mp_preference_id = ? WHERE id = ?').run(preferencia.id, pedidoId);
+      await db.prepare('UPDATE pedidos SET mp_preference_id = ? WHERE id = ?').run(preferencia.id, pedidoId);
       return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: preferencia.init_point });
     } catch (e) {
       console.error('[mercadopago] erro ao criar preferência:', e.message);
@@ -137,20 +137,20 @@ router.post('/checkout', async (req, res) => {
   res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso: 'Pagamento online ainda não configurado nesta loja. Combinaremos o pagamento por WhatsApp/telefone.' });
 });
 
-router.get('/meus-pedidos', (req, res) => {
+router.get('/meus-pedidos', async (req, res) => {
   if (!req.session.usuario) return res.status(401).json({ erro: 'Login necessário.' });
-  const pedidos = db.prepare('SELECT * FROM pedidos WHERE usuario_id = ? ORDER BY id DESC').all(req.session.usuario.id);
-  const comItens = pedidos.map(p => ({
+  const pedidos = await db.prepare('SELECT * FROM pedidos WHERE usuario_id = ? ORDER BY id DESC').all(req.session.usuario.id);
+  const comItens = await Promise.all(pedidos.map(async p => ({
     ...p,
-    itens: db.prepare('SELECT * FROM pedido_itens WHERE pedido_id = ?').all(p.id)
-  }));
+    itens: await db.prepare('SELECT * FROM pedido_itens WHERE pedido_id = ?').all(p.id)
+  })));
   res.json(comItens);
 });
 
-router.get('/:id', (req, res) => {
-  const pedido = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(req.params.id);
+router.get('/:id', async (req, res) => {
+  const pedido = await db.prepare('SELECT * FROM pedidos WHERE id = ?').get(req.params.id);
   if (!pedido) return res.status(404).json({ erro: 'Pedido não encontrado.' });
-  const itens = db.prepare('SELECT * FROM pedido_itens WHERE pedido_id = ?').all(pedido.id);
+  const itens = await db.prepare('SELECT * FROM pedido_itens WHERE pedido_id = ?').all(pedido.id);
   res.json({ ...pedido, itens });
 });
 

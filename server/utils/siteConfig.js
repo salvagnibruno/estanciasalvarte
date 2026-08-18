@@ -37,13 +37,13 @@ function montarContato({ telefone, whatsapp, instagram, email, logo } = {}) {
   };
 }
 
-function obterContatoSalvo() {
-  const row = db.prepare('SELECT valor FROM configuracoes WHERE chave = ?').get(CHAVE);
+async function obterContatoSalvo() {
+  const row = await db.prepare('SELECT valor FROM configuracoes WHERE chave = ?').get(CHAVE);
   return row ? JSON.parse(row.valor) : null;
 }
 
-function gravar(contato) {
-  db.prepare(`INSERT INTO configuracoes (chave, valor) VALUES (?, ?)
+async function gravar(contato) {
+  await db.prepare(`INSERT INTO configuracoes (chave, valor) VALUES (?, ?)
     ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`).run(CHAVE, JSON.stringify(contato));
   return contato;
 }
@@ -51,20 +51,20 @@ function gravar(contato) {
 // Dados completos que o site deve usar agora: nome/assinatura/descrição/favicon
 // continuam sempre do loja.js (não têm tela de edição); contato e logo vêm do
 // que foi salvo, uma vez que algo já tenha sido salvo.
-function obterLoja() {
-  const salvo = obterContatoSalvo();
+async function obterLoja() {
+  const salvo = await obterContatoSalvo();
   return salvo ? { ...LOJA_PADRAO, ...salvo } : LOJA_PADRAO;
 }
 
-function salvarContato(camposCrus) {
+async function salvarContato(camposCrus) {
   // Reaproveita a logo atual: esta tela nao mexe nela (troca de logo tem rota propria).
-  const atual = obterContatoSalvo();
+  const atual = await obterContatoSalvo();
   const contato = montarContato({ ...camposCrus, logo: atual ? atual.logo : LOJA_PADRAO.logo });
   return gravar(contato);
 }
 
-function salvarLogo(logoUrl) {
-  const atual = obterContatoSalvo() || montarContato(LOJA_PADRAO);
+async function salvarLogo(logoUrl) {
+  const atual = (await obterContatoSalvo()) || montarContato(LOJA_PADRAO);
   return gravar({ ...atual, logo: logoUrl });
 }
 

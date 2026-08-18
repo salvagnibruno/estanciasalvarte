@@ -110,43 +110,44 @@ const PRODUTOS = [
     tamanhos: TAM_INFANTIL, cores: CORES_POLO_INFANTIL, linhas: ['Infantil', 'Linha Verão'], imagem_url: FOTO('1987-4') }
 ];
 
-function seed(db) {
-  const jaTemDados = db.prepare('SELECT COUNT(*) AS n FROM produtos').get().n > 0;
+async function seed(db) {
+  const jaTemDados = (await db.prepare('SELECT COUNT(*) AS n FROM produtos').get()).n > 0;
   if (jaTemDados) return { skipped: true };
 
-  const insCategoria = db.prepare('INSERT INTO categorias (nome, slug, descricao, ordem) VALUES (@nome, @slug, @descricao, @ordem)');
   const catIds = {};
-  const insLinha = db.prepare('INSERT INTO linhas (nome, slug, ordem) VALUES (?, ?, ?)');
   const linhaIds = {};
 
-  const tx1 = db.transaction(() => {
+  const tx1 = db.transaction(async (tx) => {
+    const insCategoria = tx.prepare('INSERT INTO categorias (nome, slug, descricao, ordem) VALUES (@nome, @slug, @descricao, @ordem)');
     for (const c of CATEGORIAS) {
-      const info = insCategoria.run(c);
+      const info = await insCategoria.run(c);
       catIds[c.slug] = info.lastInsertRowid;
     }
-    LINHAS.forEach((nome, i) => {
+    const insLinha = tx.prepare('INSERT INTO linhas (nome, slug, ordem) VALUES (?, ?, ?)');
+    for (let i = 0; i < LINHAS.length; i++) {
+      const nome = LINHAS[i];
       const slug = nome.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-      const info = insLinha.run(nome, slug, i + 1);
+      const info = await insLinha.run(nome, slug, i + 1);
       linhaIds[nome] = info.lastInsertRowid;
-    });
+    }
   });
-  tx1();
+  await tx1();
 
-  const insProduto = db.prepare(`INSERT INTO produtos
-    (categoria_id, codigo, nome, descricao, custo, custo_fonte, percentual_markup, preco_venda, tipo_estoque, publico, imagem_url, ativo)
-    VALUES (@categoria_id, @codigo, @nome, @descricao, @custo, 'tabela', @percentual_markup, @preco_venda, @tipo_estoque, @publico, @imagem_url, 1)`);
-  const insTamanho = db.prepare('INSERT INTO produto_tamanhos (produto_id, tamanho) VALUES (?, ?)');
-  const insCor = db.prepare('INSERT INTO produto_cores (produto_id, cor_nome, cor_hex) VALUES (?, ?, ?)');
-  const insEstoque = db.prepare('INSERT INTO produto_estoque (produto_id, tamanho, cor, quantidade) VALUES (?, ?, ?, ?)');
-  const insProdutoLinha = db.prepare('INSERT INTO produto_linhas (produto_id, linha_id) VALUES (?, ?)');
+  const tx2 = db.transaction(async (tx) => {
+    const insProduto = tx.prepare(`INSERT INTO produtos
+      (categoria_id, codigo, nome, descricao, custo, custo_fonte, percentual_markup, preco_venda, tipo_estoque, publico, imagem_url, ativo)
+      VALUES (@categoria_id, @codigo, @nome, @descricao, @custo, 'tabela', @percentual_markup, @preco_venda, @tipo_estoque, @publico, @imagem_url, 1)`);
+    const insTamanho = tx.prepare('INSERT INTO produto_tamanhos (produto_id, tamanho) VALUES (?, ?)');
+    const insCor = tx.prepare('INSERT INTO produto_cores (produto_id, cor_nome, cor_hex) VALUES (?, ?, ?)');
+    const insEstoque = tx.prepare('INSERT INTO produto_estoque (produto_id, tamanho, cor, quantidade) VALUES (?, ?, ?, ?)');
+    const insProdutoLinha = tx.prepare('INSERT INTO produto_linhas (produto_id, linha_id) VALUES (?, ?)');
 
-  const tx2 = db.transaction(() => {
     let seq = 0;
     for (const p of PRODUTOS) {
       seq++;
       const { percentual, preco } = calcularPrecoVenda(p.custo);
       const codigo = `P${String(seq).padStart(3, '0')}`;
-      const info = insProduto.run({
+      const info = await insProduto.run({
         categoria_id: catIds[p.categoria],
         codigo,
         nome: p.nome,
@@ -160,23 +161,23 @@ function seed(db) {
       });
       const produtoId = info.lastInsertRowid;
 
-      for (const t of p.tamanhos) insTamanho.run(produtoId, t);
+      for (const t of p.tamanhos) await insTamanho.run(produtoId, t);
       for (const corKey of p.cores) {
         const cor = CORES[corKey] || { nome: corKey, hex: '#333333' };
-        insCor.run(produtoId, cor.nome, cor.hex);
+        await insCor.run(produtoId, cor.nome, cor.hex);
       }
       // estoque inicial de demonstração: 6 unidades por tamanho, na 1a cor cadastrada
       const primeiraCorKey = p.cores[0];
       const primeiraCor = (CORES[primeiraCorKey] || { nome: primeiraCorKey }).nome;
-      for (const t of p.tamanhos) insEstoque.run(produtoId, t, primeiraCor, 6);
+      for (const t of p.tamanhos) await insEstoque.run(produtoId, t, primeiraCor, 6);
 
       for (const linhaNome of p.linhas) {
         const linhaId = linhaIds[linhaNome];
-        if (linhaId) insProdutoLinha.run(produtoId, linhaId);
+        if (linhaId) await insProdutoLinha.run(produtoId, linhaId);
       }
     }
   });
-  tx2();
+  await tx2();
 
   return { skipped: false, total: PRODUTOS.length, categorias: CATEGORIAS.length, linhas: LINHAS.length };
 }
