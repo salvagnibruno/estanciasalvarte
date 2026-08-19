@@ -179,6 +179,9 @@ th, td { padding: .55rem .6rem; border-bottom: 1px solid var(--creme-escuro); te
 th { background: var(--creme-escuro); font-size: .78rem; text-transform: uppercase; letter-spacing: .3px; }
 tr:hover td { background: #fbf7ec; }
 .tabela-wrap { overflow-x: auto; background: #fff; border-radius: var(--raio); box-shadow: var(--sombra); border: 1px solid var(--creme-escuro); }
+/* Pedido em Desistência (prazo de pagamento vencido sem confirmação): destaque
+   visual na tabela do admin para o vendedor bater o olho e retomar contato. */
+.linha-desistencia { background: #fbeceb; }
 
 /* ---------- Painel (admin/superadmin) ---------- */
 .painel-shell { display: flex; min-height: calc(100vh - 68px); }
@@ -371,7 +374,7 @@ tr:hover td { background: #fbf7ec; }
 .chip { display: inline-block; padding: .15rem .55rem; border-radius: 20px; font-size: .72rem; font-weight: 700; }
 .chip.pendente, .chip.aguardando_pagamento { background: #f6e2b8; color: #7a5a12; }
 .chip.aprovado, .chip.pago, .chip.concluido, .chip.finalizado, .chip.atendido, .chip.avisado { background: #dcecdd; color: #1f4a25; }
-.chip.recusado, .chip.cancelado { background: #f0d7d5; color: var(--vermelho); }
+.chip.recusado, .chip.cancelado, .chip.desistencia { background: #f0d7d5; color: var(--vermelho); }
 .chip.preparando, .chip.enviado, .chip.recebido, .chip.aguardando { background: #dae4f2; color: #24457a; }
 
 /* ---------- Footer ---------- */
