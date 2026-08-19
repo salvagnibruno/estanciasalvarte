@@ -414,13 +414,8 @@ router.put('/encomendas/:id/status', async (req, res) => {
 });
 
 // ---------- Pedidos ----------
-router.get('/pedidos', async (req, res) => {
-  const pedidos = await db.prepare('SELECT * FROM pedidos ORDER BY id DESC').all();
-  res.json(await Promise.all(pedidos.map(async p => ({
-    ...p,
-    itens: await db.prepare('SELECT * FROM pedido_itens WHERE pedido_id = ?').all(p.id)
-  }))));
-});
+// Movido para routes/gestao_pedidos.js (edição de itens, cupom, dados do
+// cliente, cancelamento/troca, reconciliação e nota fiscal).
 
 // ---------- Clientes ----------
 router.get('/clientes', async (req, res) => {
@@ -452,13 +447,5 @@ router.get('/csat', async (req, res) => {
 });
 
 // Cupons: cadastro é exclusivo do superadmin (ver routes/superadmin.js).
-
-router.put('/pedidos/:id/status', async (req, res) => {
-  const { status } = req.body || {};
-  const validos = ['aguardando_pagamento', 'pago', 'enviado', 'recebido', 'finalizado', 'cancelado'];
-  if (!validos.includes(status)) return res.status(400).json({ erro: 'Status inválido.' });
-  await db.prepare(`UPDATE pedidos SET status = ?, atualizado_em = datetime('now') WHERE id = ?`).run(status, req.params.id);
-  res.json({ ok: true });
-});
 
 module.exports = router;

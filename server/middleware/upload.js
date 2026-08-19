@@ -95,7 +95,42 @@ function receberImagemSite(req, res, next) {
   });
 }
 
+// ---------- Nota fiscal (PDF anexado pelo admin após emitir no Sebrae) ----------
+// Fica FORA de public/ de propósito: a nota tem CPF e endereço do cliente, e
+// public/ é servido como arquivo estático sem autenticação nenhuma. O arquivo
+// só é acessível pela rota autenticada GET /api/gestao/pedidos/:id/nota-fiscal
+// (ver routes/gestao_pedidos.js) — nunca por URL direta e adivinhável.
+const PASTA_NOTAS = path.join(__dirname, '..', 'uploads', 'notas');
+const TAMANHO_MAXIMO_NOTA = 10 * 1024 * 1024; // 10 MB
+fs.mkdirSync(PASTA_NOTAS, { recursive: true });
+
+const uploadNotaFiscal = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, PASTA_NOTAS),
+    filename: (req, file, cb) => {
+      const pedidoId = String(req.params.id || 'pedido').replace(/[^0-9a-z]/gi, '');
+      cb(null, `nota-${pedidoId}-${Date.now()}.pdf`);
+    }
+  }),
+  limits: { fileSize: TAMANHO_MAXIMO_NOTA, files: 1 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype !== 'application/pdf') return cb(new Error('Formato não aceito. Envie um arquivo PDF.'));
+    cb(null, true);
+  }
+}).single('nota');
+
+function receberNotaFiscal(req, res, next) {
+  uploadNotaFiscal(req, res, (erro) => {
+    if (!erro) return next();
+    const mensagem = erro.code === 'LIMIT_FILE_SIZE'
+      ? 'Arquivo muito grande. O limite é 10 MB.'
+      : erro.message || 'Não foi possível receber o arquivo.';
+    res.status(400).json({ erro: mensagem });
+  });
+}
+
 module.exports = {
   receberImagemProduto, removerArquivoLocal, URL_BASE, TAMANHO_MAXIMO,
-  receberImagemSite, URL_BASE_SITE
+  receberImagemSite, URL_BASE_SITE,
+  receberNotaFiscal, PASTA_NOTAS
 };

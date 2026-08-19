@@ -1503,41 +1503,379 @@ function enderecoEntregaTexto(p) {
   return p.endereco_entrega || '-';
 }
 
+const STATUS_PEDIDO = {
+  aguardando_pagamento: 'Aguardando pagamento',
+  pago: 'Pago',
+  enviado: 'Enviado',
+  recebido: 'Recebido',
+  finalizado: 'Finalizado',
+  cancelado: 'Cancelado',
+  desistencia: 'Desistência'
+};
+const FORMA_PAGAMENTO_LABEL = {
+  cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', pix: 'Pix', combinar: 'Combinar'
+};
+const UFS_PEDIDO = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+let PEDIDO_EM_EDICAO = null;
+let PRODUTOS_CACHE_PEDIDOS = [];
+
 async function secaoPedidos() {
-  const pedidos = await Api.get('/api/gestao/pedidos');
-  const STATUS = {
-    aguardando_pagamento: 'Aguardando pagamento',
-    pago: 'Pago',
-    enviado: 'Enviado',
-    recebido: 'Recebido',
-    finalizado: 'Finalizado',
-    cancelado: 'Cancelado'
-  };
-  document.getElementById('conteudo-secao').innerHTML = `
+  const area = document.getElementById('conteudo-secao');
+  area.innerHTML = `
+    <div id="form-pedido-wrap"></div>
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Código</th><th>Cliente</th><th>CPF</th><th>Telefone</th><th>Endereço residencial</th><th>Entrega</th><th>Total</th><th>Desconto</th><th>Cupom</th><th>Valor final</th><th>Pagamento</th><th>Status</th><th>Data</th></tr></thead>
-      <tbody>${pedidos.map(p => `
-        <tr>
-          <td><strong>${escapeHtml(p.codigo || p.id)}</strong></td>
-          <td>${escapeHtml(p.nome_cliente)}<br><span style="font-size:.78rem;color:var(--texto-suave);">${escapeHtml(p.email_cliente || '-')}</span></td>
-          <td>${escapeHtml(formatarCpfExibicao(p.cpf_cliente))}</td>
-          <td>${escapeHtml(p.telefone_cliente || '-')}</td>
-          <td style="max-width:220px;">${escapeHtml(enderecoResidencialTexto(p))}</td>
-          <td style="max-width:220px;">${escapeHtml(enderecoEntregaTexto(p))}</td>
-          <td>${formatarMoeda(p.total)}</td>
-          <td>${p.valor_desconto > 0 ? '− ' + formatarMoeda(p.valor_desconto) : '-'}</td>
-          <td>${escapeHtml(p.cupom || '-')}</td>
-          <td><strong>${formatarMoeda(p.valor_final)}</strong></td>
-          <td>${escapeHtml(p.forma_pagamento || '-')}</td>
-          <td><select data-pedido-status="${p.id}">${Object.entries(STATUS).map(([valor, rotulo]) => `<option value="${valor}" ${valor === p.status ? 'selected' : ''}>${rotulo}</option>`).join('')}</select></td>
-          <td>${escapeHtml(p.criado_em)}</td>
-        </tr>
-      `).join('') || '<tr><td colspan="13">Nenhum pedido ainda.</td></tr>'}</tbody>
+      <thead><tr><th>Código</th><th>Cliente</th><th>CPF</th><th>Telefone</th><th>Endereço residencial</th><th>Entrega</th><th>Total</th><th>Desconto</th><th>Cupom</th><th>Valor final</th><th>Pagamento</th><th>Status</th><th>Data</th><th>Ações</th></tr></thead>
+      <tbody id="tbody-pedidos"></tbody>
     </table></div>
   `;
+  await carregarTabelaPedidos();
+}
+
+async function carregarTabelaPedidos() {
+  const pedidos = await Api.get('/api/gestao/pedidos');
+  document.getElementById('tbody-pedidos').innerHTML = pedidos.map(p => `
+    <tr class="${p.status === 'desistencia' ? 'linha-desistencia' : ''}">
+      <td><strong>${escapeHtml(p.codigo || p.id)}</strong></td>
+      <td>${escapeHtml(p.nome_cliente)}<br><span style="font-size:.78rem;color:var(--texto-suave);">${escapeHtml(p.email_cliente || '-')}</span></td>
+      <td>${escapeHtml(formatarCpfExibicao(p.cpf_cliente))}</td>
+      <td>${escapeHtml(p.telefone_cliente || '-')}</td>
+      <td style="max-width:220px;">${escapeHtml(enderecoResidencialTexto(p))}</td>
+      <td style="max-width:220px;">${escapeHtml(enderecoEntregaTexto(p))}</td>
+      <td>${formatarMoeda(p.total)}</td>
+      <td>${p.valor_desconto > 0 ? '− ' + formatarMoeda(p.valor_desconto) : '-'}</td>
+      <td>${escapeHtml(p.cupom || '-')}</td>
+      <td><strong>${formatarMoeda(p.valor_final)}</strong></td>
+      <td>${escapeHtml(FORMA_PAGAMENTO_LABEL[p.forma_pagamento] || p.forma_pagamento || '-')}</td>
+      <td><select data-pedido-status="${p.id}">${Object.entries(STATUS_PEDIDO).map(([valor, rotulo]) => `<option value="${valor}" ${valor === p.status ? 'selected' : ''}>${rotulo}</option>`).join('')}</select></td>
+      <td>${escapeHtml(p.criado_em)}</td>
+      <td><button class="btn pequeno" data-editar-pedido="${p.id}">Editar</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="14">Nenhum pedido ainda.</td></tr>';
+
   document.querySelectorAll('[data-pedido-status]').forEach(sel => sel.addEventListener('change', async () => {
-    await Api.put(`/api/gestao/pedidos/${sel.dataset.pedidoStatus}/status`, { status: sel.value });
+    try {
+      await Api.put(`/api/gestao/pedidos/${sel.dataset.pedidoStatus}/status`, { status: sel.value });
+      carregarTabelaPedidos();
+    } catch (e) { alert(e.message); }
   }));
+  document.querySelectorAll('[data-editar-pedido]').forEach(b => b.addEventListener('click', () => abrirFormPedido(b.dataset.editarPedido)));
+}
+
+function campoEndereco(prefixo, valores) {
+  const v = valores || {};
+  return `
+    <div class="linha-dupla">
+      <div><label>CEP</label><input id="${prefixo}-cep" value="${escapeHtml(v.cep || '')}"></div>
+      <div><label>Número</label><input id="${prefixo}-numero" value="${escapeHtml(v.numero || '')}"></div>
+    </div>
+    <label>Logradouro</label><input id="${prefixo}-logradouro" value="${escapeHtml(v.logradouro || '')}">
+    <label>Complemento (opcional)</label><input id="${prefixo}-complemento" value="${escapeHtml(v.complemento || '')}">
+    <div class="linha-dupla">
+      <div><label>Bairro</label><input id="${prefixo}-bairro" value="${escapeHtml(v.bairro || '')}"></div>
+      <div><label>Cidade</label><input id="${prefixo}-cidade" value="${escapeHtml(v.cidade || '')}"></div>
+    </div>
+    <label>UF</label>
+    <select id="${prefixo}-uf">${UFS_PEDIDO.map(uf => `<option value="${uf}" ${(v.uf || '') === uf ? 'selected' : ''}>${uf}</option>`).join('')}</select>
+  `;
+}
+
+function lerEnderecoPedido(prefixo) {
+  return {
+    cep: document.getElementById(`${prefixo}-cep`).value,
+    logradouro: document.getElementById(`${prefixo}-logradouro`).value,
+    numero: document.getElementById(`${prefixo}-numero`).value,
+    complemento: document.getElementById(`${prefixo}-complemento`).value,
+    bairro: document.getElementById(`${prefixo}-bairro`).value,
+    cidade: document.getElementById(`${prefixo}-cidade`).value,
+    uf: document.getElementById(`${prefixo}-uf`).value
+  };
+}
+
+// Texto pronto para colar no emissor de NFC-e do Sebrae (nome, CPF, endereço,
+// itens com valores) — a emissão em si é manual, feita fora do sistema.
+function dadosNotaFiscalTexto(p) {
+  const itensTexto = p.itens.map(i => `${i.quantidade}x ${i.nome_produto}${i.tamanho ? ' - ' + i.tamanho : ''}${i.cor ? ' - ' + i.cor : ''} — ${formatarMoeda(i.preco_unitario)} cada`).join('\n');
+  return `Cliente: ${p.nome_cliente}
+CPF: ${formatarCpfExibicao(p.cpf_cliente)}
+E-mail: ${p.email_cliente || '-'}
+Endereço: ${enderecoResidencialTexto(p)}
+
+Itens:
+${itensTexto}
+
+Valor total da nota: ${formatarMoeda(p.valor_final)}`;
+}
+
+function blocoNotaFiscalHtml(p) {
+  if (!p.nfce_status) {
+    return `<p style="font-size:.85rem;color:var(--texto-suave);">A nota fiscal fica disponível depois que o pagamento deste pedido for confirmado.</p>`;
+  }
+  const dadosPronto = `<textarea id="ped-nota-dados" readonly style="font-family:monospace;font-size:.82rem;height:150px;">${escapeHtml(dadosNotaFiscalTexto(p))}</textarea>
+    <small style="color:var(--texto-suave);">Copie estes dados no emissor gratuito do Sebrae (emissornfe.sebrae.com.br) para emitir a NFC-e.</small>`;
+
+  if (p.nfce_status === 'emitida') {
+    return `
+      <p><span class="badge ok">Nota emitida</span> ${p.nfce_numero ? `nº ${escapeHtml(p.nfce_numero)}` : ''}
+        — <a href="/api/gestao/pedidos/${p.id}/nota-fiscal" target="_blank">Ver PDF</a></p>
+      <button class="btn secundario" id="ped-nota-enviar" style="border-color:var(--couro);color:var(--couro);">Enviar nota fiscal ao cliente</button>
+      <p id="ped-nota-enviar-msg" class="msg" style="display:none;"></p>
+    `;
+  }
+  return `
+    ${dadosPronto}
+    <div class="linha-dupla mt-1">
+      <div><label>Número da nota (opcional)</label><input id="ped-nota-numero"></div>
+      <div><label>Chave de acesso (opcional)</label><input id="ped-nota-chave"></div>
+    </div>
+    <label>Arquivo PDF da nota emitida</label>
+    <input type="file" id="ped-nota-arquivo" accept="application/pdf">
+    <button class="btn pequeno mt-1" id="ped-nota-anexar">Anexar nota emitida</button>
+    <p id="ped-nota-msg" class="msg" style="display:none;"></p>
+  `;
+}
+
+function linhaItemPedidoHtml(item) {
+  return `
+    <tr data-item-row="${item.id}">
+      <td><select class="ped-item-produto" data-item="${item.id}">${PRODUTOS_CACHE_PEDIDOS.map(prod => `<option value="${prod.id}" ${prod.id === item.produto_id ? 'selected' : ''}>${escapeHtml(prod.nome)}</option>`).join('')}</select></td>
+      <td><input class="ped-item-tamanho" data-item="${item.id}" value="${escapeHtml(item.tamanho || '')}" style="width:70px;"></td>
+      <td><input class="ped-item-cor" data-item="${item.id}" value="${escapeHtml(item.cor || '')}" style="width:80px;"></td>
+      <td><input type="number" min="1" class="ped-item-qtd" data-item="${item.id}" value="${item.quantidade}" style="width:55px;"></td>
+      <td><input type="number" step="0.01" min="0" class="ped-item-preco" data-item="${item.id}" value="${item.preco_unitario}" style="width:85px;"></td>
+      <td>${formatarMoeda(item.preco_unitario * item.quantidade)}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn pequeno secundario" data-item-salvar="${item.id}">Salvar</button>
+        <button class="btn pequeno perigo" data-item-remover="${item.id}">Remover</button>
+      </td>
+    </tr>
+  `;
+}
+
+async function abrirFormPedido(id) {
+  if (!PRODUTOS_CACHE_PEDIDOS.length) PRODUTOS_CACHE_PEDIDOS = await Api.get('/api/gestao/produtos');
+  PEDIDO_EM_EDICAO = await Api.get(`/api/gestao/pedidos/${id}`);
+  const p = PEDIDO_EM_EDICAO;
+  const wrap = document.getElementById('form-pedido-wrap');
+
+  wrap.innerHTML = `
+    <div class="card">
+      <h3>Pedido ${escapeHtml(p.codigo || p.id)}</h3>
+
+      <h4>Dados do cliente</h4>
+      <div class="linha-dupla">
+        <div><label>Nome</label><input id="ped-nome" value="${escapeHtml(p.nome_cliente)}"></div>
+        <div><label>E-mail</label><input id="ped-email" type="email" value="${escapeHtml(p.email_cliente || '')}"></div>
+      </div>
+      <div class="linha-dupla">
+        <div><label>Telefone</label><input id="ped-telefone" value="${escapeHtml(p.telefone_cliente || '')}"></div>
+        <div><label>CPF</label><input id="ped-cpf" value="${escapeHtml(p.cpf_cliente || '')}"></div>
+      </div>
+
+      <h4>Endereço residencial</h4>
+      ${campoEndereco('ped-resid', {
+        cep: p.endereco_resid_cep, logradouro: p.endereco_resid_logradouro, numero: p.endereco_resid_numero,
+        complemento: p.endereco_resid_complemento, bairro: p.endereco_resid_bairro, cidade: p.endereco_resid_cidade, uf: p.endereco_resid_uf
+      })}
+      <label style="display:flex;align-items:center;gap:.5rem;margin-top:.6rem;">
+        <input type="checkbox" id="ped-entrega-igual" style="width:auto;" ${p.entrega_igual_residencial ? 'checked' : ''}> Entrega igual ao residencial
+      </label>
+      <div id="ped-bloco-entrega" style="${p.entrega_igual_residencial ? 'display:none;' : ''}">
+        <h4>Endereço de entrega</h4>
+        ${campoEndereco('ped-entrega', {
+          cep: p.endereco_entrega_cep, logradouro: p.endereco_entrega_logradouro, numero: p.endereco_entrega_numero,
+          complemento: p.endereco_entrega_complemento, bairro: p.endereco_entrega_bairro, cidade: p.endereco_entrega_cidade, uf: p.endereco_entrega_uf
+        })}
+      </div>
+
+      <label>Motivo de cancelamento/troca (opcional)</label>
+      <textarea id="ped-motivo" placeholder="Ex.: cliente pediu troca de tamanho">${escapeHtml(p.motivo_cancelamento || '')}</textarea>
+      <button class="btn mt-1" id="ped-salvar-dados">Salvar dados do cliente</button>
+      <p id="ped-dados-msg" class="msg" style="display:none;"></p>
+
+      <hr>
+      <h4>Itens do pedido</h4>
+      <div class="tabela-wrap"><table>
+        <thead><tr><th>Produto</th><th>Tamanho</th><th>Cor</th><th>Qtd</th><th>Preço unit.</th><th>Total</th><th>Ações</th></tr></thead>
+        <tbody id="ped-itens-tbody">${p.itens.map(linhaItemPedidoHtml).join('')}</tbody>
+      </table></div>
+      <div class="linha-dupla mt-1">
+        <div><label>Adicionar produto</label><select id="ped-novo-produto">${PRODUTOS_CACHE_PEDIDOS.map(prod => `<option value="${prod.id}">${escapeHtml(prod.nome)}</option>`).join('')}</select></div>
+        <div><label>Tamanho / Cor / Qtd</label>
+          <div class="flex">
+            <input id="ped-novo-tamanho" placeholder="tam." style="width:70px;">
+            <input id="ped-novo-cor" placeholder="cor" style="width:80px;">
+            <input id="ped-novo-qtd" type="number" min="1" value="1" style="width:55px;">
+          </div>
+        </div>
+      </div>
+      <button class="btn pequeno secundario" id="ped-item-adicionar" style="border-color:var(--couro);color:var(--couro);">+ Adicionar item</button>
+      <p id="ped-itens-msg" class="msg" style="display:none;"></p>
+
+      <hr>
+      <h4>Cupom</h4>
+      <div class="flex">
+        <input id="ped-cupom" value="${escapeHtml(p.cupom || '')}" placeholder="Código do cupom" style="text-transform:uppercase;">
+        <button class="btn pequeno secundario" id="ped-cupom-aplicar" style="border-color:var(--couro);color:var(--couro);">Aplicar</button>
+        <button class="btn pequeno secundario perigo" id="ped-cupom-remover">Remover</button>
+      </div>
+      <p id="ped-cupom-msg" class="msg" style="display:none;"></p>
+
+      <p class="mt-1" id="ped-totais">
+        Total: <strong>${formatarMoeda(p.total)}</strong>
+        ${p.valor_desconto > 0 ? ` · Desconto: − ${formatarMoeda(p.valor_desconto)}` : ''}
+        · Valor final: <strong>${formatarMoeda(p.valor_final)}</strong>
+      </p>
+
+      ${p.mp_payment_id && p.status === 'aguardando_pagamento' ? `
+        <button class="btn secundario" id="ped-reconciliar" style="border-color:var(--couro);color:var(--couro);">Reconciliar pagamento agora</button>
+        <p id="ped-reconciliar-msg" class="msg" style="display:none;"></p>
+      ` : ''}
+
+      <hr>
+      <h4>Nota fiscal</h4>
+      <div id="ped-nota-bloco">${blocoNotaFiscalHtml(p)}</div>
+
+      <div class="flex mt-2">
+        <button class="btn secundario" id="ped-fechar" style="border-color:#999;color:#666;">Fechar</button>
+      </div>
+    </div>
+  `;
+
+  ligarFormPedido(p.id);
+  focarNaTela(wrap, 'ped-nome');
+}
+
+// Recarrega o pedido do servidor e redesenha o formulário (mantém aberto,
+// já que quase toda ação aqui muda algo que a tela precisa refletir na hora).
+async function recarregarFormPedido(id) {
+  await abrirFormPedido(id);
+}
+
+function ligarFormPedido(pedidoId) {
+  document.getElementById('ped-fechar').addEventListener('click', () => {
+    document.getElementById('form-pedido-wrap').innerHTML = '';
+    PEDIDO_EM_EDICAO = null;
+  });
+
+  const entregaIgual = document.getElementById('ped-entrega-igual');
+  entregaIgual.addEventListener('change', () => {
+    document.getElementById('ped-bloco-entrega').style.display = entregaIgual.checked ? 'none' : 'block';
+  });
+
+  // ---- Dados do cliente ----
+  document.getElementById('ped-salvar-dados').addEventListener('click', async () => {
+    const msg = document.getElementById('ped-dados-msg');
+    const igual = entregaIgual.checked;
+    try {
+      await Api.put(`/api/gestao/pedidos/${pedidoId}`, {
+        nome_cliente: document.getElementById('ped-nome').value,
+        email_cliente: document.getElementById('ped-email').value,
+        telefone_cliente: document.getElementById('ped-telefone').value,
+        cpf_cliente: document.getElementById('ped-cpf').value,
+        endereco_residencial: lerEnderecoPedido('ped-resid'),
+        entrega_igual_residencial: igual,
+        endereco_entrega: igual ? undefined : lerEnderecoPedido('ped-entrega'),
+        motivo_cancelamento: document.getElementById('ped-motivo').value
+      });
+      msg.textContent = 'Dados atualizados!'; msg.className = 'msg sucesso'; msg.style.display = 'block';
+      carregarTabelaPedidos();
+    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block'; }
+  });
+
+  // ---- Itens: salvar/remover linha existente ----
+  document.querySelectorAll('[data-item-salvar]').forEach(b => b.addEventListener('click', async () => {
+    const itemId = b.dataset.itemSalvar;
+    const msg = document.getElementById('ped-itens-msg');
+    try {
+      await Api.put(`/api/gestao/pedidos/${pedidoId}/itens/${itemId}`, {
+        produto_id: parseInt(document.querySelector(`.ped-item-produto[data-item="${itemId}"]`).value, 10),
+        tamanho: document.querySelector(`.ped-item-tamanho[data-item="${itemId}"]`).value,
+        cor: document.querySelector(`.ped-item-cor[data-item="${itemId}"]`).value,
+        quantidade: document.querySelector(`.ped-item-qtd[data-item="${itemId}"]`).value,
+        preco_unitario: document.querySelector(`.ped-item-preco[data-item="${itemId}"]`).value
+      });
+      await recarregarFormPedido(pedidoId);
+      carregarTabelaPedidos();
+    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block'; }
+  }));
+  document.querySelectorAll('[data-item-remover]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Remover este item do pedido?')) return;
+    const msg = document.getElementById('ped-itens-msg');
+    try {
+      await Api.del(`/api/gestao/pedidos/${pedidoId}/itens/${b.dataset.itemRemover}`);
+      await recarregarFormPedido(pedidoId);
+      carregarTabelaPedidos();
+    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block'; }
+  }));
+
+  // ---- Itens: adicionar ----
+  document.getElementById('ped-item-adicionar').addEventListener('click', async () => {
+    const msg = document.getElementById('ped-itens-msg');
+    try {
+      await Api.post(`/api/gestao/pedidos/${pedidoId}/itens`, {
+        produto_id: parseInt(document.getElementById('ped-novo-produto').value, 10),
+        tamanho: document.getElementById('ped-novo-tamanho').value,
+        cor: document.getElementById('ped-novo-cor').value,
+        quantidade: document.getElementById('ped-novo-qtd').value
+      });
+      await recarregarFormPedido(pedidoId);
+      carregarTabelaPedidos();
+    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block'; }
+  });
+
+  // ---- Cupom ----
+  document.getElementById('ped-cupom-aplicar').addEventListener('click', async () => {
+    const msg = document.getElementById('ped-cupom-msg');
+    try {
+      await Api.put(`/api/gestao/pedidos/${pedidoId}/cupom`, { codigo: document.getElementById('ped-cupom').value });
+      await recarregarFormPedido(pedidoId);
+      carregarTabelaPedidos();
+    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block'; }
+  });
+  document.getElementById('ped-cupom-remover').addEventListener('click', async () => {
+    await Api.put(`/api/gestao/pedidos/${pedidoId}/cupom`, { codigo: null });
+    await recarregarFormPedido(pedidoId);
+    carregarTabelaPedidos();
+  });
+
+  // ---- Reconciliar pagamento ----
+  const btnReconciliar = document.getElementById('ped-reconciliar');
+  if (btnReconciliar) btnReconciliar.addEventListener('click', async () => {
+    const msg = document.getElementById('ped-reconciliar-msg');
+    msg.style.display = 'block'; msg.textContent = 'Consultando o Mercado Pago...'; msg.className = 'msg';
+    try {
+      const r = await Api.post(`/api/gestao/pedidos/${pedidoId}/reconciliar`, {});
+      msg.textContent = `Status atualizado: ${STATUS_PEDIDO[r.status] || r.status}`; msg.className = 'msg sucesso';
+      await recarregarFormPedido(pedidoId);
+      carregarTabelaPedidos();
+    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; }
+  });
+
+  // ---- Nota fiscal ----
+  const btnAnexar = document.getElementById('ped-nota-anexar');
+  if (btnAnexar) btnAnexar.addEventListener('click', async () => {
+    const msg = document.getElementById('ped-nota-msg');
+    msg.style.display = 'block';
+    const arquivo = document.getElementById('ped-nota-arquivo').files[0];
+    if (!arquivo) { msg.textContent = 'Escolha o arquivo PDF da nota primeiro.'; msg.className = 'msg erro'; return; }
+    const formData = new FormData();
+    formData.append('nota', arquivo);
+    formData.append('numero', document.getElementById('ped-nota-numero').value);
+    formData.append('chave', document.getElementById('ped-nota-chave').value);
+    try {
+      await Api.upload(`/api/gestao/pedidos/${pedidoId}/nota-fiscal`, formData);
+      await recarregarFormPedido(pedidoId);
+    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; }
+  });
+  const btnEnviarNota = document.getElementById('ped-nota-enviar');
+  if (btnEnviarNota) btnEnviarNota.addEventListener('click', async () => {
+    const msg = document.getElementById('ped-nota-enviar-msg');
+    msg.style.display = 'block'; msg.textContent = 'Enviando...'; msg.className = 'msg';
+    try {
+      await Api.post(`/api/gestao/pedidos/${pedidoId}/nota-fiscal/enviar`, {});
+      msg.textContent = 'Nota fiscal enviada ao cliente!'; msg.className = 'msg sucesso';
+    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; }
+  });
 }
 
 // ==================== AGENDAMENTOS ====================
