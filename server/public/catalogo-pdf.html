@@ -253,6 +253,7 @@ h1, h2, h3, h4 { font-family: Georgia, 'Times New Roman', serif; margin: 0; }
   margin-top: 12mm; background: var(--dourado); color: var(--texto);
   font-family: Georgia, serif; font-size: 13pt; font-weight: 700;
   padding: 4mm 10mm; border-radius: 20mm;
+  display: inline-block; text-decoration: none;
 }
 .fechamento .validade { margin-top: 8mm; font-size: 8.5pt; color: #b6a894; }
 
@@ -292,6 +293,9 @@ const PUBLICO = params.get('publico') || '';
 const INCLUIR_UNISSEX = params.get('unissex') !== '0';
 const SOMENTE_DESTAQUE = params.get('destaque') === '1';
 const INCLUIR_PRECOS = params.get('precos') !== '0';
+// Numero direto do WhatsApp da loja para a chamada final do catalogo — nao
+// vem do cadastro de contato porque e' um link (wa.me), nao so' o telefone.
+const LINK_WHATSAPP_FECHAMENTO = 'https://wa.me/5551992613965';
 const POR_PAGINA = 4; // 2 colunas x 2 linhas por folha A4 (ver .grade no CSS)
 
 const EMOJI_CATEGORIA = {
@@ -502,7 +506,7 @@ function paginaFechamento(dados) {
         ${canal('Loja online', loja.site)}
         ${canal('Endereço', loja.endereco)}
       </div>
-      <div class="chamada">Peça agora pelo WhatsApp ${escapeHtml(loja.whatsappLabel || '')}</div>
+      <a class="chamada" href="${LINK_WHATSAPP_FECHAMENTO}">Peça agora pelo WhatsApp ${escapeHtml(loja.whatsappLabel || '')}</a>
       <p class="validade">Catálogo gerado em ${dataPorExtenso(dados.gerado_em)}.
         ${INCLUIR_PRECOS ? 'Preços válidos enquanto durarem os estoques.' : 'Consulte-nos para orçamento.'}</p>
     </section>`;
