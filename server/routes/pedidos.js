@@ -6,6 +6,7 @@ const pagamento = require('./pagamento');
 const { registrarCliente, gerarCodigoPedido } = require('../db/migrate');
 const { avaliarCupom, registrarUsoCupom } = require('./cupons');
 const { validarCPF, somenteDigitos } = require('../utils/cpf');
+const email = require('../utils/email');
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UFS_VALIDAS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB',
@@ -31,6 +32,24 @@ function formatarEnderecoTexto(e) {
     `${e.cidade}/${String(e.uf).toUpperCase()}`,
     e.cep ? `CEP ${e.cep}` : null
   ].filter(Boolean).join(' - ');
+}
+
+// Estoque e' reservado (debitado) na criacao do pedido, nao so' quando pago —
+// para nao vender o mesmo item pra dois clientes com pagamento pendente (ver
+// server/utils/pagamentoStatus.js, que devolve o estoque se o pedido expirar,
+// for cancelado ou tiver o pagamento recusado). Produto "sob encomenda" nao
+// tem estoque proprio: a loja produz/compra por pedido, entao nunca falta.
+// `itens` aqui vem de montarRespostaCarrinho, que ja traz `tipo_estoque`.
+async function itemComEstoqueInsuficiente(itens) {
+  for (const item of itens) {
+    if (item.tipo_estoque === 'sob_encomenda') continue;
+    const linha = await db.prepare(`SELECT quantidade FROM produto_estoque
+      WHERE produto_id = ? AND IFNULL(tamanho,'') = IFNULL(?,'') AND IFNULL(cor,'') = IFNULL(?,'')`)
+      .get(item.produto_id, item.tamanho, item.cor);
+    const disponivel = linha ? linha.quantidade : 0;
+    if (disponivel < item.quantidade) return item;
+  }
+  return null;
 }
 
 router.post('/checkout', async (req, res) => {
@@ -68,6 +87,13 @@ router.post('/checkout', async (req, res) => {
   const { itens, total } = await montarRespostaCarrinho(carrinho);
   if (itens.length === 0) return res.status(400).json({ erro: 'Seu carrinho está vazio.' });
 
+  const itemFaltando = await itemComEstoqueInsuficiente(itens);
+  if (itemFaltando) {
+    return res.status(400).json({
+      erro: `"${itemFaltando.produto_nome}" não tem mais estoque suficiente para a quantidade pedida (${itemFaltando.quantidade}). Ajuste a quantidade no carrinho.`
+    });
+  }
+
   // O desconto e' sempre recalculado aqui, a partir dos itens de verdade: o
   // valor que veio da tela nao e' confiavel.
   const resultadoCupom = cupom ? await avaliarCupom(cupom, itens) : null;
@@ -80,39 +106,51 @@ router.post('/checkout', async (req, res) => {
   const cliente = await registrarCliente(db, { nome: nome_cliente, email: email_cliente, telefone: telefone_cliente, cpf: cpfLimpo });
   const codigo = await gerarCodigoPedido(db, new Date().getFullYear());
 
-  const info = await db.prepare(`INSERT INTO pedidos
-    (codigo, usuario_id, cliente_id, nome_cliente, email_cliente, telefone_cliente, cpf_cliente,
-     endereco_resid_cep, endereco_resid_logradouro, endereco_resid_numero, endereco_resid_complemento,
-     endereco_resid_bairro, endereco_resid_cidade, endereco_resid_uf, entrega_igual_residencial,
-     endereco_entrega_cep, endereco_entrega_logradouro, endereco_entrega_numero, endereco_entrega_complemento,
-     endereco_entrega_bairro, endereco_entrega_cidade, endereco_entrega_uf, endereco_entrega,
-     total, valor_desconto, cupom, valor_final, status, forma_pagamento)
-    VALUES (@codigo, @usuario_id, @cliente_id, @nome_cliente, @email_cliente, @telefone_cliente, @cpf_cliente,
-     @resid_cep, @resid_logradouro, @resid_numero, @resid_complemento, @resid_bairro, @resid_cidade, @resid_uf,
-     @entrega_igual_residencial,
-     @entrega_cep, @entrega_logradouro, @entrega_numero, @entrega_complemento, @entrega_bairro, @entrega_cidade, @entrega_uf,
-     @endereco_entrega_texto, @total, @valor_desconto, @cupom, @valor_final, 'aguardando_pagamento', @forma_pagamento)`)
-    .run({
-      codigo, usuario_id: usuarioId, cliente_id: cliente ? cliente.id : null,
-      nome_cliente, email_cliente: email_cliente.trim().toLowerCase(), telefone_cliente, cpf_cliente: cpfLimpo,
-      resid_cep: residencial.cep, resid_logradouro: residencial.logradouro, resid_numero: residencial.numero,
-      resid_complemento: residencial.complemento || null, resid_bairro: residencial.bairro,
-      resid_cidade: residencial.cidade, resid_uf: String(residencial.uf).toUpperCase(),
-      entrega_igual_residencial: igualResidencial ? 1 : 0,
-      entrega_cep: entrega.cep, entrega_logradouro: entrega.logradouro, entrega_numero: entrega.numero,
-      entrega_complemento: entrega.complemento || null, entrega_bairro: entrega.bairro,
-      entrega_cidade: entrega.cidade, entrega_uf: String(entrega.uf).toUpperCase(),
-      endereco_entrega_texto: formatarEnderecoTexto(entrega),
-      total, valor_desconto: valorDesconto, cupom: cupomAplicado, valor_final: valorFinal, forma_pagamento: forma_pagamento || null
-    });
-  const pedidoId = info.lastInsertRowid;
+  // Grava o pedido, os itens e reserva o estoque (debita na hora, nao so'
+  // quando pago) numa unica transacao: ou o pedido inteiro entra com o
+  // estoque debitado, ou nada entra — nunca um pedido "pela metade".
+  const gravarPedido = db.transaction(async (tx) => {
+    const info = await tx.prepare(`INSERT INTO pedidos
+      (codigo, usuario_id, cliente_id, nome_cliente, email_cliente, telefone_cliente, cpf_cliente,
+       endereco_resid_cep, endereco_resid_logradouro, endereco_resid_numero, endereco_resid_complemento,
+       endereco_resid_bairro, endereco_resid_cidade, endereco_resid_uf, entrega_igual_residencial,
+       endereco_entrega_cep, endereco_entrega_logradouro, endereco_entrega_numero, endereco_entrega_complemento,
+       endereco_entrega_bairro, endereco_entrega_cidade, endereco_entrega_uf, endereco_entrega,
+       total, valor_desconto, cupom, valor_final, status, forma_pagamento, estoque_reservado)
+      VALUES (@codigo, @usuario_id, @cliente_id, @nome_cliente, @email_cliente, @telefone_cliente, @cpf_cliente,
+       @resid_cep, @resid_logradouro, @resid_numero, @resid_complemento, @resid_bairro, @resid_cidade, @resid_uf,
+       @entrega_igual_residencial,
+       @entrega_cep, @entrega_logradouro, @entrega_numero, @entrega_complemento, @entrega_bairro, @entrega_cidade, @entrega_uf,
+       @endereco_entrega_texto, @total, @valor_desconto, @cupom, @valor_final, 'aguardando_pagamento', @forma_pagamento, 1)`)
+      .run({
+        codigo, usuario_id: usuarioId, cliente_id: cliente ? cliente.id : null,
+        nome_cliente, email_cliente: email_cliente.trim().toLowerCase(), telefone_cliente, cpf_cliente: cpfLimpo,
+        resid_cep: residencial.cep, resid_logradouro: residencial.logradouro, resid_numero: residencial.numero,
+        resid_complemento: residencial.complemento || null, resid_bairro: residencial.bairro,
+        resid_cidade: residencial.cidade, resid_uf: String(residencial.uf).toUpperCase(),
+        entrega_igual_residencial: igualResidencial ? 1 : 0,
+        entrega_cep: entrega.cep, entrega_logradouro: entrega.logradouro, entrega_numero: entrega.numero,
+        entrega_complemento: entrega.complemento || null, entrega_bairro: entrega.bairro,
+        entrega_cidade: entrega.cidade, entrega_uf: String(entrega.uf).toUpperCase(),
+        endereco_entrega_texto: formatarEnderecoTexto(entrega),
+        total, valor_desconto: valorDesconto, cupom: cupomAplicado, valor_final: valorFinal, forma_pagamento: forma_pagamento || null
+      });
+    const novoPedidoId = info.lastInsertRowid;
 
-  const insItem = db.prepare(`INSERT INTO pedido_itens (pedido_id, produto_id, nome_produto, tamanho, cor, quantidade, preco_unitario, custo_unitario)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-  for (const item of itens) {
-    const produto = await db.prepare('SELECT custo FROM produtos WHERE id = ?').get(item.produto_id);
-    await insItem.run(pedidoId, item.produto_id, item.produto_nome, item.tamanho, item.cor, item.quantidade, item.preco_unitario, produto ? produto.custo : 0);
-  }
+    const insItem = tx.prepare(`INSERT INTO pedido_itens (pedido_id, produto_id, nome_produto, tamanho, cor, quantidade, preco_unitario, custo_unitario)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const item of itens) {
+      const produto = await tx.prepare('SELECT custo FROM produtos WHERE id = ?').get(item.produto_id);
+      await insItem.run(novoPedidoId, item.produto_id, item.produto_nome, item.tamanho, item.cor, item.quantidade, item.preco_unitario, produto ? produto.custo : 0);
+      if (item.tipo_estoque !== 'sob_encomenda') {
+        await tx.prepare(`UPDATE produto_estoque SET quantidade = MAX(0, quantidade - ?)
+          WHERE produto_id = ? AND IFNULL(tamanho,'') = IFNULL(?,'') AND IFNULL(cor,'') = IFNULL(?,'')`)
+          .run(item.quantidade, item.produto_id, item.tamanho, item.cor);
+      }
+    }
+    return novoPedidoId;
+  });
+  const pedidoId = await gravarPedido();
 
   if (cupomAplicado) await registrarUsoCupom(cupomAplicado);
 
@@ -122,11 +160,16 @@ router.post('/checkout', async (req, res) => {
 
   const pedido = await db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedidoId);
 
+  // Aviso ao superadmin de que chegou um pedido novo — nao bloqueia o
+  // checkout se o envio falhar (SMTP fora do ar, por exemplo).
+  email.enviarAvisoNovoPedido(pedido, itens).catch(e => console.error('[email] aviso de novo pedido:', e.message));
+
   if (forma_pagamento !== 'combinar' && pagamento.configurado()) {
     try {
       const baseUrl = `${req.protocol}://${req.get('host')}`;
       const preferencia = await pagamento.criarPreferencia(pedido, itens, baseUrl);
-      await db.prepare('UPDATE pedidos SET mp_preference_id = ? WHERE id = ?').run(preferencia.id, pedidoId);
+      await db.prepare('UPDATE pedidos SET mp_preference_id = ?, expira_em = ? WHERE id = ?')
+        .run(preferencia.id, preferencia.expiraEm, pedidoId);
       return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: preferencia.init_point });
     } catch (e) {
       console.error('[mercadopago] erro ao criar preferência:', e.message);
@@ -155,3 +198,6 @@ router.get('/:id', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.erroDoEndereco = erroDoEndereco;
+module.exports.formatarEnderecoTexto = formatarEnderecoTexto;
+module.exports.UFS_VALIDAS = UFS_VALIDAS;

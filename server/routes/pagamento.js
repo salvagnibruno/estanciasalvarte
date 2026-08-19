@@ -26,6 +26,13 @@ function getClient() {
   return mpClient;
 }
 
+// Prazo de pagamento do link: 1h. O pedido guarda esse mesmo instante em
+// pedidos.expira_em (ver routes/pedidos.js), entao os dois vencem juntos — o
+// Mercado Pago recusa o pagamento no proprio checkout dele depois desse prazo,
+// e o sweep de expiracao (server/utils/expiracao.js) marca o pedido como
+// "Desistência" no mesmo momento.
+const VALIDADE_LINK_MS = 60 * 60 * 1000;
+
 async function criarPreferencia(pedido, itens, baseUrl) {
   const client = getClient();
   if (!client) return null;
@@ -47,6 +54,9 @@ async function criarPreferencia(pedido, itens, baseUrl) {
         currency_id: 'BRL'
       }));
 
+  const agora = new Date();
+  const expiraEm = new Date(agora.getTime() + VALIDADE_LINK_MS);
+
   const preference = new Preference(client);
   const resposta = await preference.create({
     body: {
@@ -59,10 +69,15 @@ async function criarPreferencia(pedido, itens, baseUrl) {
         failure: `${baseUrl}/checkout.html?falha=1`
       },
       auto_return: 'approved',
-      notification_url: `${baseUrl}/api/pagamento/webhook`
+      notification_url: `${baseUrl}/api/pagamento/webhook`,
+      expires: true,
+      expiration_date_from: agora.toISOString(),
+      expiration_date_to: expiraEm.toISOString()
     }
   });
-  return resposta;
+  // `expiraEm` calculado aqui (nao lido de volta da resposta do MP) para
+  // garantir que o pedido no nosso banco vence exatamente junto com o link.
+  return { ...resposta, expiraEm: expiraEm.toISOString() };
 }
 
 async function consultarPagamento(paymentId) {

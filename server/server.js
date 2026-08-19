@@ -39,6 +39,7 @@ const encomendasRoutes = require('./routes/encomendas');
 const agendamentosRoutes = require('./routes/agendamentos');
 const interessesRoutes = require('./routes/interesses');
 const gestaoRoutes = require('./routes/gestao');
+const gestaoPedidosRoutes = require('./routes/gestao_pedidos');
 const superadminRoutes = require('./routes/superadmin');
 const catalogoRoutes = require('./routes/catalogo');
 const csatRoutes = require('./routes/csat');
@@ -52,6 +53,9 @@ app.use('/api/pagamento', pagamentoRouter);
 app.use('/api/encomendas', encomendasRoutes);
 app.use('/api/agendamentos', agendamentosRoutes);
 app.use('/api/interesses', interessesRoutes);
+// Prefixo mais especifico primeiro: /api/gestao/pedidos precisa ser
+// resolvido pelo router novo antes de cair no /api/gestao generico.
+app.use('/api/gestao/pedidos', gestaoPedidosRoutes);
 app.use('/api/gestao', gestaoRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api', catalogoRoutes);
@@ -117,6 +121,13 @@ db.iniciar()
     app.listen(PORT, () => {
       console.log(`Estância Salvarte rodando em http://localhost:${PORT}`);
     });
+
+    // Varre pedidos vencidos a cada 5 minutos e marca como Desistência (ver
+    // server/utils/expiracao.js). So' comeca depois que o banco esta pronto.
+    const { flipPedidosExpirados } = require('./utils/expiracao');
+    setInterval(() => {
+      flipPedidosExpirados().catch(e => console.error('[expiracao] erro:', e.message));
+    }, 5 * 60 * 1000);
   })
   .catch(e => {
     console.error('[startup] não foi possível iniciar o banco de dados:', e);
