@@ -218,6 +218,37 @@ async function migrar(db) {
   if (await adicionarColuna(db, 'pedidos', 'endereco_entrega_cidade', 'TEXT')) mudancas.push('pedidos.endereco_entrega_cidade');
   if (await adicionarColuna(db, 'pedidos', 'endereco_entrega_uf', 'TEXT')) mudancas.push('pedidos.endereco_entrega_uf');
 
+  // ---------- pedidos: prazo de pagamento, reserva de estoque, cancelamento, nota fiscal ----------
+  if (await adicionarColuna(db, 'pedidos', 'expira_em', 'TEXT')) mudancas.push('pedidos.expira_em');
+  if (await adicionarColuna(db, 'pedidos', 'estoque_reservado', 'INTEGER NOT NULL DEFAULT 0')) mudancas.push('pedidos.estoque_reservado');
+  if (await adicionarColuna(db, 'pedidos', 'estoque_devolvido', 'INTEGER NOT NULL DEFAULT 0')) mudancas.push('pedidos.estoque_devolvido');
+  if (await adicionarColuna(db, 'pedidos', 'motivo_cancelamento', 'TEXT')) mudancas.push('pedidos.motivo_cancelamento');
+  if (await adicionarColuna(db, 'pedidos', 'nfce_status', 'TEXT')) mudancas.push('pedidos.nfce_status');
+  if (await adicionarColuna(db, 'pedidos', 'nfce_numero', 'TEXT')) mudancas.push('pedidos.nfce_numero');
+  if (await adicionarColuna(db, 'pedidos', 'nfce_chave', 'TEXT')) mudancas.push('pedidos.nfce_chave');
+  if (await adicionarColuna(db, 'pedidos', 'nfce_pdf_url', 'TEXT')) mudancas.push('pedidos.nfce_pdf_url');
+  if (await adicionarColuna(db, 'pedidos', 'nfce_emitida_em', 'TEXT')) mudancas.push('pedidos.nfce_emitida_em');
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_pedidos_expira ON pedidos(status, expira_em)`);
+  await db.exec(`CREATE TABLE IF NOT EXISTS pedido_edicoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pedido_id INTEGER NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+    usuario_email TEXT,
+    tipo TEXT NOT NULL,
+    detalhe TEXT,
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_pedido_edicoes_pedido ON pedido_edicoes(pedido_id)`);
+
+  // Pedidos antigos ainda aguardando pagamento: dá 1h a partir de agora (não a
+  // partir de criado_em, que poderia estar anos no passado e desistir tudo de
+  // uma vez). `estoque_reservado` fica 0 nesses pedidos antigos (padrão da
+  // coluna), então o sweep de expiração nunca devolve estoque que eles nunca
+  // chegaram a reservar sob a regra anterior (que só debitava ao confirmar o
+  // pagamento).
+  const semPrazo = await db.prepare(`UPDATE pedidos SET expira_em = datetime('now', '+1 hour')
+    WHERE status = 'aguardando_pagamento' AND expira_em IS NULL`).run();
+  if (semPrazo.changes > 0) mudancas.push(`${semPrazo.changes} pedido(s) aguardando pagamento com prazo de expiração definido`);
+
   // ---------- catalogo: troca de linha de produtos (uma vez so) ----------
   if (await resetarCatalogoAntigo(db)) mudancas.push('catálogo antigo substituído pela nova lista de produtos');
 

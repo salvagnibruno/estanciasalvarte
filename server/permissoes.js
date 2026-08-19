@@ -9,6 +9,11 @@ const PERMISSOES = [
     chave: 'exportar_catalogo',
     nome: 'Exportar catálogo',
     descricao: 'Gerar o catálogo comercial completo em PDF, com produtos, fotos e preços da loja.'
+  },
+  {
+    chave: 'gerenciar_pedidos',
+    nome: 'Gerenciar pedidos',
+    descricao: 'Editar itens, cupom e dados do cliente em pedidos, e reconciliar pagamentos manualmente.'
   }
 ];
 

@@ -200,10 +200,30 @@ CREATE TABLE IF NOT EXISTS pedidos (
   cupom TEXT,
   valor_final REAL NOT NULL DEFAULT 0,    -- total - valor_desconto (o que o cliente paga)
   status TEXT NOT NULL DEFAULT 'aguardando_pagamento',
-    -- aguardando_pagamento|pago|enviado|recebido|finalizado|cancelado
+    -- aguardando_pagamento|pago|enviado|recebido|finalizado|cancelado|desistencia
   forma_pagamento TEXT, -- cartao_credito|cartao_debito|pix
   mp_preference_id TEXT,
   mp_payment_id TEXT,
+  -- Prazo de pagamento: igual a' expiracao do proprio link do Mercado Pago
+  -- (ver routes/pagamento.js:criarPreferencia), NULL para pedidos 'combinar'
+  -- ou quando o Mercado Pago nao esta' configurado (nada a expirar).
+  expira_em TEXT,
+  -- Estoque e' reservado (debitado) na criacao do pedido, nao so' quando pago —
+  -- para nao vender o mesmo item pra dois clientes com pagamento pendente.
+  -- Ver server/utils/pagamentoStatus.js. `estoque_reservado` distingue pedidos
+  -- criados depois desta mudanca (que reservam) dos pedidos antigos (que nunca
+  -- reservaram sob a regra anterior); `estoque_devolvido` trava contra
+  -- devolucao em dobro se o status mudar mais de uma vez.
+  estoque_reservado INTEGER NOT NULL DEFAULT 0,
+  estoque_devolvido INTEGER NOT NULL DEFAULT 0,
+  motivo_cancelamento TEXT, -- texto livre (cancelamento/troca), editavel pelo admin
+  -- Nota fiscal (NFC-e) — emitida manualmente pelo lojista no emissor gratuito
+  -- do Sebrae (sem API); o painel so' guarda o resultado e envia por e-mail.
+  nfce_status TEXT, -- NULL | pendente | emitida | nao_aplicavel
+  nfce_numero TEXT,
+  nfce_chave TEXT,
+  nfce_pdf_url TEXT,
+  nfce_emitida_em TEXT,
   criado_em TEXT NOT NULL DEFAULT (datetime('now')),
   atualizado_em TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -219,6 +239,19 @@ CREATE TABLE IF NOT EXISTS pedido_itens (
   preco_unitario REAL NOT NULL,
   custo_unitario REAL NOT NULL DEFAULT 0
 );
+
+-- Auditoria de edicoes do admin num pedido (item, cupom, dados do cliente,
+-- status, reconciliacao, nota fiscal) — um pedido e' um registro financeiro,
+-- editar sem rastro seria arriscado.
+CREATE TABLE IF NOT EXISTS pedido_edicoes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pedido_id INTEGER NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
+  usuario_email TEXT,
+  tipo TEXT NOT NULL, -- item_add|item_edit|item_remove|cupom|dados_cliente|status|reconciliacao|nota_fiscal
+  detalhe TEXT,
+  criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pedido_edicoes_pedido ON pedido_edicoes(pedido_id);
 
 CREATE TABLE IF NOT EXISTS encomendas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -341,3 +374,6 @@ CREATE INDEX IF NOT EXISTS idx_pedido_itens_pedido ON pedido_itens(pedido_id);
 CREATE INDEX IF NOT EXISTS idx_eventos_tipo ON eventos_analytics(tipo);
 CREATE INDEX IF NOT EXISTS idx_agendamentos_status ON agendamentos(status);
 CREATE INDEX IF NOT EXISTS idx_usuario_permissoes_usuario ON usuario_permissoes(usuario_id);
+-- idx_pedidos_expira fica em migrate.js, como os demais indices de colunas
+-- novas (ver comentario acima): em bancos antigos, expira_em so existe depois
+-- do ALTER TABLE, entao o indice nao pode estar aqui.
