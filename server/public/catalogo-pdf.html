@@ -290,6 +290,7 @@ const CATEGORIAS = params.get('categorias') || params.get('categoria') || '';
 // pecas que servem aos dois.
 const PUBLICO = params.get('publico') || '';
 const INCLUIR_UNISSEX = params.get('unissex') !== '0';
+const SOMENTE_DESTAQUE = params.get('destaque') === '1';
 const INCLUIR_PRECOS = params.get('precos') !== '0';
 const POR_PAGINA = 4; // 2 colunas x 2 linhas por folha A4 (ver .grade no CSS)
 
@@ -528,6 +529,7 @@ async function montar() {
     consulta.set('publico', PUBLICO);
     if (!INCLUIR_UNISSEX) consulta.set('unissex', '0');
   }
+  if (SOMENTE_DESTAQUE) consulta.set('destaque', '1');
   if (!INCLUIR_PRECOS) consulta.set('precos', '0');
   // Marca de tempo: garante que nem o navegador nem um proxy sirvam a resposta
   // de uma geracao anterior quando a selecao muda.

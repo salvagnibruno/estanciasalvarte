@@ -735,6 +735,10 @@ function faixaExportarCatalogoHtml() {
         <label class="opcao-unissex" id="cat-unissex-area" hidden>
           <input type="checkbox" id="cat-unissex" checked> incluir as unissex
         </label>
+        <select id="cat-situacao" title="Filtrar por situação">
+          <option value="">Produtos ativos</option>
+          <option value="destaque">Somente em destaque</option>
+        </select>
         <select id="cat-precos" title="Exibir valores">${opcoesPrecosHtml()}</select>
         <button class="btn" id="cat-gerar">Gerar PDF</button>
         <button class="btn secundario" id="cat-visualizar">👁️ Visualizar</button>
@@ -765,6 +769,7 @@ function ligarExportarCatalogo() {
       consulta.set('publico', publico);
       if (!document.getElementById('cat-unissex').checked) consulta.set('unissex', '0');
     }
+    if (document.getElementById('cat-situacao').value === 'destaque') consulta.set('destaque', '1');
     return consulta;
   };
 
@@ -825,6 +830,7 @@ function ligarExportarCatalogo() {
   const sincronizarPublico = () => { areaUnissex.hidden = !publico.value; };
   publico.addEventListener('change', () => { sincronizarPublico(); atualizarResumo(); });
   document.getElementById('cat-unissex').addEventListener('change', atualizarResumo);
+  document.getElementById('cat-situacao').addEventListener('change', atualizarResumo);
 
   document.getElementById('cat-gerar').addEventListener('click', () => abrir(true));
   document.getElementById('cat-visualizar').addEventListener('click', () => abrir(false));

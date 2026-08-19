@@ -93,6 +93,9 @@ router.get('/catalogo', exigirPermissao('exportar_catalogo'), async (req, res) =
   // as pecas que servem aos dois. Sem `publico`, entra tudo.
   const publico = PUBLICOS_FILTRAVEIS.includes(req.query.publico) ? req.query.publico : null;
   const incluirUnissex = req.query.unissex !== '0';
+  // `destaque=1` recorta para so' os produtos marcados como destaque (o mesmo
+  // sinalizador do carrossel da home). Sem isso, entram todos os ativos.
+  const somenteDestaque = req.query.destaque === '1';
 
   const params = [];
   let filtro = 'WHERE p.ativo = 1';
@@ -103,6 +106,9 @@ router.get('/catalogo', exigirPermissao('exportar_catalogo'), async (req, res) =
   if (publico) {
     filtro += incluirUnissex ? " AND p.publico IN (?, 'unissex')" : ' AND p.publico = ?';
     params.push(publico);
+  }
+  if (somenteDestaque) {
+    filtro += ' AND p.destaque = 1';
   }
 
   const linhas = await db.prepare(`
@@ -163,10 +169,12 @@ router.get('/catalogo', exigirPermissao('exportar_catalogo'), async (req, res) =
     // O escopo sai dos nomes que realmente vieram; se uma categoria escolhida
     // estiver sem produto ativo, ela nao entra na capa nem no arquivo.
     escopo: nomeDoEscopo(slugs, categorias.map(c => c.nome))
-      + (publico ? ` — ${rotuloPublico(publico, incluirUnissex)}` : ''),
+      + (publico ? ` — ${rotuloPublico(publico, incluirUnissex)}` : '')
+      + (somenteDestaque ? ' — somente destaques' : ''),
     categorias_pedidas: slugs,
     publico,
     inclui_unissex: publico ? incluirUnissex : null,
+    somente_destaque: somenteDestaque,
     total_produtos: linhas.length,
     gerado_em: new Date().toISOString(),
     categorias

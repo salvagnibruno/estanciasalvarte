@@ -18,9 +18,15 @@ function handleInstagram(v) {
     .replace(/\/+$/, '');
 }
 
+function limparSite(v) {
+  return String(v || '').trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '');
+}
+
 // Recebe os campos crus do formulário e devolve o objeto completo (com os
 // links/labels derivados), no mesmo formato de server/loja.js.
-function montarContato({ telefone, whatsapp, instagram, email, logo } = {}) {
+function montarContato({ telefone, whatsapp, instagram, email, site, logo } = {}) {
   const telefoneDigitos = somenteDigitos(telefone);
   const whatsappDigitos = somenteDigitos(whatsapp);
   const handle = handleInstagram(instagram);
@@ -33,6 +39,7 @@ function montarContato({ telefone, whatsapp, instagram, email, logo } = {}) {
     instagram: handle ? `https://instagram.com/${handle}` : null,
     instagramLabel: handle ? `@${handle}` : null,
     email: email ? String(email).trim() : null,
+    site: limparSite(site) || null,
     logo: logo || null
   };
 }

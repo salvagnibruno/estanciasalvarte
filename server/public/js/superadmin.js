@@ -374,6 +374,7 @@ async function secaoSite(avisoEmEdicao) {
         <div><label>Instagram</label><input id="st-instagram" placeholder="@estanciasalvarte" value="${escapeHtml(loja.instagramLabel || '')}"></div>
         <div><label>E-mail</label><input id="st-email" type="email" value="${escapeHtml(loja.email || '')}"></div>
       </div>
+      <label>Site</label><input id="st-site" placeholder="estanciasalvarte.com.br" value="${escapeHtml(loja.site || '')}">
       <button class="btn mt-1" id="st-salvar">Salvar contato</button>
       <p id="st-msg" class="msg" style="display:none;"></p>
     </div>
@@ -420,7 +421,8 @@ async function secaoSite(avisoEmEdicao) {
         telefone: document.getElementById('st-telefone').value,
         whatsapp: document.getElementById('st-whatsapp').value,
         instagram: document.getElementById('st-instagram').value,
-        email: document.getElementById('st-email').value
+        email: document.getElementById('st-email').value,
+        site: document.getElementById('st-site').value
       });
       msg.textContent = 'Contato atualizado!'; msg.className = 'msg sucesso'; msg.style.display = 'block';
     } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block'; }

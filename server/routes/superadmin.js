@@ -376,11 +376,11 @@ router.get('/site', async (req, res) => {
 });
 
 router.put('/site', async (req, res) => {
-  const { telefone, whatsapp, instagram, email } = req.body || {};
+  const { telefone, whatsapp, instagram, email, site } = req.body || {};
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) {
     return res.status(400).json({ erro: 'Informe um e-mail válido (ou deixe em branco).' });
   }
-  res.json(await salvarContato({ telefone, whatsapp, instagram, email }));
+  res.json(await salvarContato({ telefone, whatsapp, instagram, email, site }));
 });
 
 router.post('/site/logo', receberImagemSite, async (req, res) => {
