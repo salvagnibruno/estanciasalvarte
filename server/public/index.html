@@ -639,7 +639,11 @@ document.getElementById('vitrine-limpar').addEventListener('click', () => {
 });
 
 // ==================== INICIO ====================
-carregarCategorias().then(carregarVitrine);
+// Categorias e vitrine sao independentes na primeira renderizacao (a home
+// abre sem categoria selecionada) — chamar em paralelo em vez de encadear
+// poupa uma volta inteira de rede na primeira pintura da vitrine.
+carregarCategorias();
+carregarVitrine();
 renderizarCarrinho();
 </script>
 </body>

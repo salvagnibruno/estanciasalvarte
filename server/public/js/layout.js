@@ -49,13 +49,10 @@ async function avisosAtivosHtml() {
   }
 }
 
-async function montarHeader() {
+async function montarHeader(avisosHtml) {
   const alvo = document.getElementById('app-header');
   if (!alvo) return;
   const atual = caminhoAtual();
-  // sincronizarContato() já rodou (ver DOMContentLoaded, no fim do arquivo) —
-  // CONTATO aqui já reflete o que o superadmin salvou em /superadmin > Site.
-  const avisosHtml = await avisosAtivosHtml();
 
   alvo.innerHTML = `
     ${avisosHtml}
@@ -84,8 +81,9 @@ async function montarHeader() {
     document.getElementById('nav-links').classList.toggle('aberto');
   });
 
-  await atualizarAreaUsuario();
-  await atualizarContadorCarrinho();
+  // Independentes uma da outra — rodam em paralelo em vez de uma esperar a
+  // outra, o que so' atrasava o preenchimento do cabecalho sem necessidade.
+  await Promise.all([atualizarAreaUsuario(), atualizarContadorCarrinho()]);
 }
 
 async function atualizarAreaUsuario() {
@@ -149,11 +147,11 @@ function montarFooter() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Sincroniza contato ANTES de montar header e rodapé: os dois leem do
-  // mesmo objeto CONTATO, e o rodapé não tem lógica própria de espera —
-  // sem isto, ele podia montar com os valores padrão (ex.: sem e-mail) e
-  // só o cabeçalho ficar com o dado atualizado pelo superadmin.
-  await sincronizarContato();
-  montarHeader();
+  // Contato e avisos são independentes — buscados em paralelo em vez de um
+  // atrás do outro, o que só atrasava a primeira pintura do cabeçalho.
+  // Os dois precisam terminar antes do header (e o rodapé precisa do
+  // CONTATO já sincronizado, por isso os dois vêm depois do await).
+  const [, avisosHtml] = await Promise.all([sincronizarContato(), avisosAtivosHtml()]);
+  montarHeader(avisosHtml);
   montarFooter();
 });

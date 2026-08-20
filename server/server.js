@@ -91,16 +91,18 @@ app.use((req, res, next) => {
 });
 
 // ---------- Frontend estatico ----------
-// Paginas e scripts saem com `no-store`: o navegador nunca reaproveita uma
-// versao anterior. Sem isto, depois de uma atualizacao do sistema a aba antiga
-// continuava rodando o painel velho — e a selecao de categorias do catalogo
-// parecia ser ignorada, porque a tela montava a URL no formato antigo.
-// Imagens e CSS seguem com a validacao normal (ETag), que ja e' suficiente.
+// Paginas e scripts saem com `no-cache`: o navegador SEMPRE revalida com o
+// servidor antes de usar uma copia (nunca roda painel velho depois de um
+// deploy), mas pode reaproveitar o arquivo via ETag quando ele nao mudou —
+// vira um 304 pequeno em vez de rebaixar o JS/HTML inteiro de novo a cada
+// pagina. `no-store` (removido) impedia esse cache condicional por completo,
+// o que pesava na navegacao entre paginas (varios .html, cada um puxando
+// api.js/layout.js do zero). Imagens e CSS seguem com a validacao normal
+// (ETag), que ja e' suficiente.
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, caminho) => {
     if (/\.(html|js)$/i.test(caminho)) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
     }
   }
 }));
