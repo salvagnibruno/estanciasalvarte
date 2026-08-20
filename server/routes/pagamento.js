@@ -123,7 +123,17 @@ function detalheErroMp(e) {
     const causas = Array.isArray(e.cause)
       ? e.cause.map(c => (c && (c.description || c.code)) || JSON.stringify(c)).join('; ')
       : null;
-    const partes = [e.message, e.error, causas].filter(Boolean);
+    // status/code/blocked_by vem no PROPRIO corpo JSON quando a API devolve
+    // (o SDK joga fora o objeto Response — a gente nao tem acesso ao status
+    // HTTP separado do fetch, so' ao que a API escreveu dentro do corpo).
+    const partes = [
+      e.status ? `HTTP ${e.status}` : null,
+      e.message,
+      e.error,
+      e.code,
+      e.blocked_by ? `bloqueado por: ${e.blocked_by}` : null,
+      causas
+    ].filter(Boolean);
     if (partes.length) texto = partes.join(' — ');
     else { try { texto = JSON.stringify(e); } catch { /* segue pro fallback */ } }
   }

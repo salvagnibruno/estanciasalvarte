@@ -201,7 +201,7 @@ tr:hover td { background: #fbf7ec; }
   }
   .tabela-wrap table tr:hover td { background: none; }
   .tabela-wrap table td {
-    display: flex; justify-content: space-between; align-items: center; gap: .8rem;
+    display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .4rem .8rem;
     padding: .5rem 0; border-bottom: 1px dashed var(--creme-escuro); text-align: right;
   }
   .tabela-wrap table td:last-child { border-bottom: none; }
@@ -210,6 +210,14 @@ tr:hover td { background: #fbf7ec; }
     font-size: .74rem; text-transform: uppercase; letter-spacing: .3px; flex-shrink: 0;
   }
   .tabela-wrap table td[data-label=""]::before { content: none; }
+  /* Celula de "Ações" (Editar/Excluir) tem white-space:nowrap embutido no
+     HTML pro modo tabela normal (mantem os botões numa linha só na coluna
+     estreita). Nesse layout empilhado o <td> vira flex item, e um item flex
+     com min-width:auto NAO encolhe abaixo do conteudo sem quebra — o nowrap
+     sozinho ja bastava pra' estourar a largura da tela e trazer de volta o
+     cursor horizontal que este bloco inteiro existe pra' evitar. */
+  .tabela-wrap table td { white-space: normal !important; min-width: 0; }
+  .tabela-wrap table td > * { min-width: 0; }
   .tabela-wrap table td.col-secundaria { display: none; }
   .tabela-wrap table tr.linha-expandida td.col-secundaria { display: flex; }
   .tabela-wrap table td.col-expandir { justify-content: center; border-bottom: none; padding-top: .2rem; }
