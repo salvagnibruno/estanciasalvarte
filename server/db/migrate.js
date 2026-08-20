@@ -220,6 +220,7 @@ async function migrar(db) {
 
   // ---------- pedidos: prazo de pagamento, reserva de estoque, cancelamento, nota fiscal ----------
   if (await adicionarColuna(db, 'pedidos', 'expira_em', 'TEXT')) mudancas.push('pedidos.expira_em');
+  if (await adicionarColuna(db, 'encomendas', 'pedido_id', 'INTEGER REFERENCES pedidos(id)')) mudancas.push('encomendas.pedido_id');
   if (await adicionarColuna(db, 'pedidos', 'estoque_reservado', 'INTEGER NOT NULL DEFAULT 0')) mudancas.push('pedidos.estoque_reservado');
   if (await adicionarColuna(db, 'pedidos', 'estoque_devolvido', 'INTEGER NOT NULL DEFAULT 0')) mudancas.push('pedidos.estoque_devolvido');
   if (await adicionarColuna(db, 'pedidos', 'motivo_cancelamento', 'TEXT')) mudancas.push('pedidos.motivo_cancelamento');
@@ -248,6 +249,26 @@ async function migrar(db) {
   const semPrazo = await db.prepare(`UPDATE pedidos SET expira_em = datetime('now', '+1 hour')
     WHERE status = 'aguardando_pagamento' AND expira_em IS NULL`).run();
   if (semPrazo.changes > 0) mudancas.push(`${semPrazo.changes} pedido(s) aguardando pagamento com prazo de expiração definido`);
+
+  // ---------- produto_estoque: some duplicada por causa do NULL no UNIQUE ----------
+  // O UNIQUE(produto_id,tamanho,cor) antigo nao pegava tamanho/cor NULL (NULL
+  // nao e' igual a NULL pro SQLite): produto sem variacao (o caso mais comum)
+  // furava a restricao e cada "Salvar" na tela de estoque inserida uma linha
+  // nova em vez de atualizar a existente. Junta as duplicatas (soma a
+  // quantidade na mais antiga, apaga o resto) antes de criar o indice novo,
+  // que normaliza NULL como '' e passa a bloquear isso de verdade.
+  const duplicados = await db.prepare(`
+    SELECT produto_id, IFNULL(tamanho,'') AS tam, IFNULL(cor,'') AS cor, MIN(id) AS manter, SUM(quantidade) AS total
+    FROM produto_estoque GROUP BY produto_id, tam, cor HAVING COUNT(*) > 1
+  `).all();
+  for (const d of duplicados) {
+    await db.prepare(`UPDATE produto_estoque SET quantidade = ? WHERE id = ?`).run(d.total, d.manter);
+    await db.prepare(`DELETE FROM produto_estoque WHERE produto_id = ? AND IFNULL(tamanho,'') = ? AND IFNULL(cor,'') = ? AND id != ?`)
+      .run(d.produto_id, d.tam, d.cor, d.manter);
+  }
+  if (duplicados.length) mudancas.push(`${duplicados.length} grupo(s) de estoque duplicado consolidados`);
+  await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_produto_estoque_unico
+    ON produto_estoque(produto_id, IFNULL(tamanho,''), IFNULL(cor,''))`);
 
   // ---------- catalogo: troca de linha de produtos (uma vez so) ----------
   if (await resetarCatalogoAntigo(db)) mudancas.push('catálogo antigo substituído pela nova lista de produtos');

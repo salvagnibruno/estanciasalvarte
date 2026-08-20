@@ -40,16 +40,27 @@ function formatarEnderecoTexto(e) {
 // for cancelado ou tiver o pagamento recusado). Produto "sob encomenda" nao
 // tem estoque proprio: a loja produz/compra por pedido, entao nunca falta.
 // `itens` aqui vem de montarRespostaCarrinho, que ja traz `tipo_estoque`.
-async function itemComEstoqueInsuficiente(itens) {
+//
+// Item sem estoque suficiente NAO bloqueia o checkout: o pedido segue normal
+// (a quantidade que faltar vira uma encomenda automatica, ver checkout()
+// abaixo) — so' informamos o cliente do que ficou pendente.
+async function itensComFaltaDeEstoque(itens) {
+  const faltantes = [];
   for (const item of itens) {
     if (item.tipo_estoque === 'sob_encomenda') continue;
     const linha = await db.prepare(`SELECT quantidade FROM produto_estoque
       WHERE produto_id = ? AND IFNULL(tamanho,'') = IFNULL(?,'') AND IFNULL(cor,'') = IFNULL(?,'')`)
       .get(item.produto_id, item.tamanho, item.cor);
     const disponivel = linha ? linha.quantidade : 0;
-    if (disponivel < item.quantidade) return item;
+    if (disponivel < item.quantidade) faltantes.push({ ...item, faltam: item.quantidade - disponivel });
   }
-  return null;
+  return faltantes;
+}
+
+function mensagemEncomendas(itensFaltantes) {
+  if (!itensFaltantes.length) return null;
+  const partes = itensFaltantes.map(i => `"${i.produto_nome}" (${i.faltam} unidade${i.faltam > 1 ? 's' : ''})`);
+  return `Sem estoque suficiente para ${partes.join(', ')} agora — registramos um pedido de encomenda e vamos combinar o prazo pelo WhatsApp/telefone.`;
 }
 
 router.post('/checkout', async (req, res) => {
@@ -87,12 +98,7 @@ router.post('/checkout', async (req, res) => {
   const { itens, total } = await montarRespostaCarrinho(carrinho);
   if (itens.length === 0) return res.status(400).json({ erro: 'Seu carrinho está vazio.' });
 
-  const itemFaltando = await itemComEstoqueInsuficiente(itens);
-  if (itemFaltando) {
-    return res.status(400).json({
-      erro: `"${itemFaltando.produto_nome}" não tem mais estoque suficiente para a quantidade pedida (${itemFaltando.quantidade}). Ajuste a quantidade no carrinho.`
-    });
-  }
+  const itensFaltantes = await itensComFaltaDeEstoque(itens);
 
   // O desconto e' sempre recalculado aqui, a partir dos itens de verdade: o
   // valor que veio da tela nao e' confiavel.
@@ -152,6 +158,17 @@ router.post('/checkout', async (req, res) => {
   });
   const pedidoId = await gravarPedido();
 
+  // Item que faltou estoque vira encomenda automatica, ligada a este pedido
+  // (o cliente ja' sabe do prazo combinado — ver aviso montado abaixo).
+  for (const item of itensFaltantes) {
+    await db.prepare(`INSERT INTO encomendas
+      (produto_id, usuario_id, pedido_id, nome, email, telefone, tamanho, cor, quantidade, tipo, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'encomenda', 'aguardando')`)
+      .run(item.produto_id, usuarioId, pedidoId, nome_cliente, email_cliente.trim().toLowerCase(), telefone_cliente,
+        item.tamanho, item.cor, item.faltam);
+  }
+  const avisoEstoque = mensagemEncomendas(itensFaltantes);
+
   if (cupomAplicado) await registrarUsoCupom(cupomAplicado);
 
   await db.prepare(`UPDATE carrinhos SET status = 'convertido' WHERE id = ?`).run(carrinho.id);
@@ -170,14 +187,16 @@ router.post('/checkout', async (req, res) => {
       const preferencia = await pagamento.criarPreferencia(pedido, itens, baseUrl);
       await db.prepare('UPDATE pedidos SET mp_preference_id = ?, expira_em = ? WHERE id = ?')
         .run(preferencia.id, preferencia.expiraEm, pedidoId);
-      return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: preferencia.init_point });
+      return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: preferencia.init_point, aviso: avisoEstoque || undefined });
     } catch (e) {
       console.error('[mercadopago] erro ao criar preferência:', e.message);
-      return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso: 'Não foi possível iniciar o pagamento online agora. Entraremos em contato pelo WhatsApp para combinar o pagamento.' });
+      const aviso = [avisoEstoque, 'Não foi possível iniciar o pagamento online agora. Entraremos em contato pelo WhatsApp para combinar o pagamento.'].filter(Boolean).join(' ');
+      return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso });
     }
   }
 
-  res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso: 'Pagamento online ainda não configurado nesta loja. Combinaremos o pagamento por WhatsApp/telefone.' });
+  const aviso = [avisoEstoque, 'Pagamento online ainda não configurado nesta loja. Combinaremos o pagamento por WhatsApp/telefone.'].filter(Boolean).join(' ');
+  res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso });
 });
 
 router.get('/meus-pedidos', async (req, res) => {

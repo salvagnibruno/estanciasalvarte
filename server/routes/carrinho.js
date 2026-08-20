@@ -68,6 +68,14 @@ router.put('/itens/:itemId', async (req, res) => {
   res.json(await montarRespostaCarrinho(carrinho));
 });
 
+router.delete('/', async (req, res) => {
+  const carrinho = await obterCarrinhoAtual(req);
+  await db.prepare('DELETE FROM carrinho_itens WHERE carrinho_id = ?').run(carrinho.id);
+  await db.prepare(`INSERT INTO eventos_analytics (tipo, usuario_id, sessao_id) VALUES ('carrinho_esvaziado', ?, ?)`)
+    .run(req.session.usuario ? req.session.usuario.id : null, req.session.sid);
+  res.json(await montarRespostaCarrinho(carrinho));
+});
+
 router.delete('/itens/:itemId', async (req, res) => {
   const carrinho = await obterCarrinhoAtual(req);
   const item = await db.prepare('SELECT * FROM carrinho_itens WHERE id = ? AND carrinho_id = ?').get(req.params.itemId, carrinho.id);

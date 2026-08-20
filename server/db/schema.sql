@@ -73,9 +73,13 @@ CREATE TABLE IF NOT EXISTS produto_estoque (
   produto_id INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
   tamanho TEXT,
   cor TEXT,
-  quantidade INTEGER NOT NULL DEFAULT 0,
-  UNIQUE(produto_id, tamanho, cor)
+  quantidade INTEGER NOT NULL DEFAULT 0
 );
+-- O indice unico (por expressao, com IFNULL) e' criado em db/migrate.js, nao
+-- aqui: bancos que ja existiam antes desta correcao podem ter linhas
+-- duplicadas (tamanho/cor NULL furava um UNIQUE comum) e precisam ser
+-- consolidadas ANTES do indice existir, senao a criacao dele falha. Ver o
+-- comentario em migrate.js para o motivo completo.
 
 CREATE TABLE IF NOT EXISTS usuarios (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,6 +261,10 @@ CREATE TABLE IF NOT EXISTS encomendas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   produto_id INTEGER NOT NULL REFERENCES produtos(id),
   usuario_id INTEGER REFERENCES usuarios(id),
+  -- Pedido que gerou esta encomenda automaticamente por falta de estoque no
+  -- checkout (ver routes/pedidos.js). NULL nas encomendas manuais (cliente usa
+  -- "Encomendar"/"Avisar quando chegar" na página do produto).
+  pedido_id INTEGER REFERENCES pedidos(id),
   nome TEXT NOT NULL,
   email TEXT,
   telefone TEXT,

@@ -219,6 +219,7 @@ document.getElementById('btn-finalizar').addEventListener('click', async () => {
       cupom: compra.cupom
     });
     if (resposta.checkout_url) {
+      if (resposta.aviso) alert(resposta.aviso);
       window.location.href = resposta.checkout_url;
     } else {
       window.location.href = '/pedido-confirmado.html?pedido=' + resposta.pedido_id + (resposta.aviso ? '&aviso=' + encodeURIComponent(resposta.aviso) : '');

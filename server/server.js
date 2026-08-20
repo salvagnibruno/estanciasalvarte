@@ -2,12 +2,18 @@ require('dotenv').config();
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
+const compression = require('compression');
 const cookieSession = require('cookie-session');
 const db = require('./db/db');
 const { usuarioAtual } = require('./middleware/auth');
 
 const app = express();
 app.set('trust proxy', 1);
+// Comprime HTML/CSS/JS/JSON antes de sair — sem isto nada tinha compressao
+// (nem o Express nem o proxy da hospedagem fazem isso sozinhos), o que pesa
+// bastante em conexao movel: o catalogo de produtos, por exemplo, sai a mais
+// de 30KB em JSON puro.
+app.use(compression());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

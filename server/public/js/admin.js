@@ -1914,17 +1914,18 @@ async function secaoEncomendas() {
   const STATUS = ['aguardando', 'avisado', 'atendido', 'cancelado'];
   document.getElementById('conteudo-secao').innerHTML = `
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Produto</th><th>Tipo</th><th>Cliente</th><th>Telefone</th><th>Tam./Cor</th><th>Status</th><th>Data</th></tr></thead>
+      <thead><tr><th>Produto</th><th>Tipo</th><th>Cliente</th><th>Telefone</th><th>Tam./Cor</th><th>Pedido</th><th>Status</th><th>Data</th></tr></thead>
       <tbody>${encomendas.map(e => `
         <tr>
           <td>${escapeHtml(e.produto_nome)}</td>
           <td>${e.tipo === 'encomenda' ? 'Encomenda' : 'Avisar estoque'}</td>
           <td>${escapeHtml(e.nome)}</td><td>${escapeHtml(e.telefone || '-')}</td>
           <td>${escapeHtml(e.tamanho || '-')} / ${escapeHtml(e.cor || '-')}</td>
+          <td>${e.pedido_id ? `#${e.pedido_id}` : '-'}</td>
           <td><select data-enc-status="${e.id}">${STATUS.map(s => `<option value="${s}" ${s === e.status ? 'selected' : ''}>${s}</option>`).join('')}</select></td>
           <td>${escapeHtml(e.criado_em)}</td>
         </tr>
-      `).join('') || '<tr><td colspan="7">Nada por aqui.</td></tr>'}</tbody>
+      `).join('') || '<tr><td colspan="8">Nada por aqui.</td></tr>'}</tbody>
     </table></div>
   `;
   document.querySelectorAll('[data-enc-status]').forEach(sel => sel.addEventListener('change', async () => {

@@ -347,8 +347,11 @@ router.put('/produtos/:id/estoque', async (req, res) => {
   if (!produto) return res.status(404).json({ erro: 'Produto não encontrado.' });
   const { tamanho, cor, quantidade } = req.body || {};
   const qtd = Math.max(0, parseInt(quantidade, 10) || 0);
+  // Alvo do ON CONFLICT precisa bater com o indice por expressao (ver
+  // schema.sql/migrate.js) — UNIQUE(produto_id,tamanho,cor) puro nao pegava
+  // tamanho/cor NULL e deixava entrar uma linha duplicada a cada salvamento.
   await db.prepare(`INSERT INTO produto_estoque (produto_id, tamanho, cor, quantidade) VALUES (?, ?, ?, ?)
-    ON CONFLICT(produto_id, tamanho, cor) DO UPDATE SET quantidade = excluded.quantidade`)
+    ON CONFLICT(produto_id, IFNULL(tamanho,''), IFNULL(cor,'')) DO UPDATE SET quantidade = excluded.quantidade`)
     .run(produto.id, tamanho || null, cor || null, qtd);
   res.json({ ok: true });
 });

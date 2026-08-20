@@ -7,7 +7,10 @@
 // loga no console em vez de enviar, então dá para testar o fluxo inteiro em
 // desenvolvimento sem configurar SMTP.
 
-const db = require('../db/db');
+// Caixa de entrada da loja para avisos de pedido novo — independente de quais
+// contas tenham papel 'superadmin' (login), pode ser trocada via env sem mexer
+// no código.
+const EMAIL_AVISO_NOVO_PEDIDO = process.env.EMAIL_AVISO_PEDIDOS || 'estanciasalvarte@gmail.com';
 
 let transportador = null;
 
@@ -75,17 +78,11 @@ function formatarMoeda(valor) {
   return (valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-async function obterEmailsSuperadmin() {
-  const linhas = await db.prepare(`SELECT email FROM usuarios WHERE papel = 'superadmin' AND ativo = 1`).all();
-  return linhas.map(l => l.email).filter(Boolean);
-}
-
-// Aviso ao(s) superadmin(s) de que chegou um pedido novo — disparado logo
-// depois que o pedido e' gravado (routes/pedidos.js), qualquer que seja a
-// forma de pagamento escolhida.
+// Aviso à loja de que chegou um pedido novo — disparado logo depois que o
+// pedido e' gravado (routes/pedidos.js), qualquer que seja a forma de
+// pagamento escolhida.
 async function enviarAvisoNovoPedido(pedido, itens) {
-  const destinatarios = await obterEmailsSuperadmin();
-  if (!destinatarios.length) return { enviado: false, motivo: 'sem_superadmin_cadastrado' };
+  const destinatarios = [EMAIL_AVISO_NOVO_PEDIDO];
 
   if (!configurado()) {
     console.log(`[email] SMTP não configurado — novo pedido ${pedido.codigo || pedido.id} (${pedido.nome_cliente}) não notificado por e-mail.`);

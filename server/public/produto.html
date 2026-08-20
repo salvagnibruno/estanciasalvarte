@@ -169,7 +169,16 @@ async function adicionarAoCarrinho() {
     await Api.post('/api/carrinho/itens', { produto_id: produtoAtual.id, tamanho: tamanhoSel, cor: corSel, quantidade });
     mostrarMsg('Adicionado ao carrinho!', 'sucesso');
     atualizarContadorCarrinho();
+    mostrarLinkCarrinho();
   } catch (e) { mostrarMsg(e.message, 'erro'); }
+}
+
+// Depois de adicionar com sucesso, oferece o atalho para encerrar a compra
+// sem obrigar o cliente a procurar o ícone do carrinho no cabeçalho.
+function mostrarLinkCarrinho() {
+  if (document.getElementById('link-ir-carrinho')) return;
+  document.getElementById('area-acao').insertAdjacentHTML('beforeend',
+    ' <a href="/carrinho.html" id="link-ir-carrinho" class="btn secundario" style="border-color:var(--couro);color:var(--couro);">Ir para o carrinho</a>');
 }
 
 function abrirFormEncomenda(tipo) {
