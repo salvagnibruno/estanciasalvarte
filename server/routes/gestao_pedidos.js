@@ -6,10 +6,10 @@ const express = require('express');
 const path = require('path');
 const router = express.Router();
 const db = require('../db/db');
-const { exigirPermissao } = require('../middleware/auth');
+const { exigirPermissao, exigirPapel } = require('../middleware/auth');
 const { avaliarCupom, registrarUsoCupom } = require('./cupons');
 const pagamento = require('./pagamento');
-const { definirStatusPedido, aplicarStatusPagamento } = require('../utils/pagamentoStatus');
+const { definirStatusPedido, aplicarStatusPagamento, devolverEstoquePedido } = require('../utils/pagamentoStatus');
 const email = require('../utils/email');
 const { receberNotaFiscal, PASTA_NOTAS } = require('../middleware/upload');
 const { erroDoEndereco, formatarEnderecoTexto } = require('./pedidos');
@@ -89,6 +89,28 @@ router.get('/:id', async (req, res) => {
   res.json({ ...pedido, itens });
 });
 
+// ---------- Exclusão (só superadmin — 'gerenciar_pedidos' não basta aqui) ----------
+router.delete('/:id', exigirPapel('superadmin'), async (req, res) => {
+  const pedido = await db.prepare('SELECT * FROM pedidos WHERE id = ?').get(req.params.id);
+  if (!pedido) return res.status(404).json({ erro: 'Pedido não encontrado.' });
+
+  // Devolve o estoque reservado antes de apagar — senão a peça fica presa pra
+  // sempre num pedido que nem existe mais (mesma regra do cancelamento).
+  await devolverEstoquePedido(db, pedido.id);
+
+  const excluir = db.transaction(async (tx) => {
+    // Encomenda automatica ligada a este pedido (falta de estoque no
+    // checkout) continua existindo — só desvincula do pedido apagado.
+    await tx.prepare('UPDATE encomendas SET pedido_id = NULL WHERE pedido_id = ?').run(pedido.id);
+    await tx.prepare('DELETE FROM pedido_itens WHERE pedido_id = ?').run(pedido.id);
+    await tx.prepare('DELETE FROM pedido_edicoes WHERE pedido_id = ?').run(pedido.id);
+    await tx.prepare('DELETE FROM pedidos WHERE id = ?').run(pedido.id);
+  });
+  await excluir();
+
+  res.json({ ok: true });
+});
+
 // ---------- Status (com "Desistência" e devolução de estoque embutidas —
 // ver server/utils/pagamentoStatus.js:definirStatusPedido) ----------
 router.put('/:id/status', async (req, res) => {
@@ -98,6 +120,31 @@ router.put('/:id/status', async (req, res) => {
   if (!novoStatus) return res.status(404).json({ erro: 'Pedido não encontrado.' });
   await registrarEdicao(req.params.id, req, 'status', `→ ${status}`);
   res.json({ ok: true });
+});
+
+// ---------- Gerar (ou tentar de novo) o link de pagamento do Mercado Pago ----------
+// Útil quando a primeira tentativa falhou (token inválido, conta ainda não
+// verificada, etc.) — depois de corrigir a configuração, o admin manda tentar
+// de novo sem precisar que o cliente refaça o checkout inteiro.
+router.post('/:id/gerar-link', async (req, res) => {
+  const pedido = await db.prepare('SELECT * FROM pedidos WHERE id = ?').get(req.params.id);
+  if (!pedido) return res.status(404).json({ erro: 'Pedido não encontrado.' });
+  if (!pagamento.configurado()) {
+    return res.status(400).json({ erro: 'Mercado Pago não está configurado nesta loja (falta o Access Token de produção no ambiente).' });
+  }
+  const itens = await db.prepare('SELECT * FROM pedido_itens WHERE pedido_id = ?').all(pedido.id);
+  try {
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const preferencia = await pagamento.criarPreferencia(pedido, itens, baseUrl);
+    await db.prepare('UPDATE pedidos SET mp_preference_id = ?, expira_em = ?, erro_pagamento = NULL WHERE id = ?')
+      .run(preferencia.id, preferencia.expiraEm, pedido.id);
+    await registrarEdicao(pedido.id, req, 'reconciliacao', 'Link de pagamento gerado manualmente pelo superadmin');
+    res.json({ ok: true, checkout_url: preferencia.init_point });
+  } catch (e) {
+    const detalhe = pagamento.detalheErroMp(e);
+    await db.prepare('UPDATE pedidos SET erro_pagamento = ? WHERE id = ?').run(detalhe, pedido.id);
+    res.status(400).json({ erro: 'Não foi possível gerar o link agora: ' + detalhe });
+  }
 });
 
 // ---------- Dados do cliente / endereço / motivo de cancelamento ----------

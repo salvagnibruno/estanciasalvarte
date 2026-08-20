@@ -208,6 +208,11 @@ CREATE TABLE IF NOT EXISTS pedidos (
   forma_pagamento TEXT, -- cartao_credito|cartao_debito|pix
   mp_preference_id TEXT,
   mp_payment_id TEXT,
+  -- Texto de erro cru devolvido pela API do Mercado Pago quando a criação do
+  -- link falha (ver routes/pagamento.js:detalheErroMp) — assim o superadmin
+  -- vê a causa real na tela do pedido, sem precisar de acesso ao log do
+  -- servidor. Limpo (NULL) assim que um link é gerado com sucesso.
+  erro_pagamento TEXT,
   -- Prazo de pagamento: igual a' expiracao do proprio link do Mercado Pago
   -- (ver routes/pagamento.js:criarPreferencia), NULL para pedidos 'combinar'
   -- ou quando o Mercado Pago nao esta' configurado (nada a expirar).

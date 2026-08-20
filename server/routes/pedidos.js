@@ -48,10 +48,15 @@ async function itensComFaltaDeEstoque(itens) {
   const faltantes = [];
   for (const item of itens) {
     if (item.tipo_estoque === 'sob_encomenda') continue;
-    const linha = await db.prepare(`SELECT quantidade FROM produto_estoque
+    // SUM em vez de pegar uma linha so': a baixa de estoque (mais abaixo, e em
+    // devolverEstoquePedido/ajustarEstoqueTroca) ja' afeta TODAS as linhas que
+    // baterem no IFNULL, entao a conferencia precisa enxergar o mesmo total —
+    // senao uma duplicata remanescente (de antes do indice unico por expressao
+    // existir) engana a conferencia mesmo com o estoque de verdade disponivel.
+    const linha = await db.prepare(`SELECT SUM(quantidade) AS quantidade FROM produto_estoque
       WHERE produto_id = ? AND IFNULL(tamanho,'') = IFNULL(?,'') AND IFNULL(cor,'') = IFNULL(?,'')`)
       .get(item.produto_id, item.tamanho, item.cor);
-    const disponivel = linha ? linha.quantidade : 0;
+    const disponivel = linha && linha.quantidade != null ? linha.quantidade : 0;
     if (disponivel < item.quantidade) faltantes.push({ ...item, faltam: item.quantidade - disponivel });
   }
   return faltantes;
@@ -189,7 +194,9 @@ router.post('/checkout', async (req, res) => {
         .run(preferencia.id, preferencia.expiraEm, pedidoId);
       return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: preferencia.init_point, aviso: avisoEstoque || undefined });
     } catch (e) {
-      console.error('[mercadopago] erro ao criar preferência:', e.message);
+      const detalhe = pagamento.detalheErroMp(e);
+      console.error('[mercadopago] erro ao criar preferência:', detalhe);
+      await db.prepare('UPDATE pedidos SET erro_pagamento = ? WHERE id = ?').run(detalhe, pedidoId);
       const aviso = [avisoEstoque, 'Não foi possível iniciar o pagamento online agora. Entraremos em contato pelo WhatsApp para combinar o pagamento.'].filter(Boolean).join(' ');
       return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso });
     }

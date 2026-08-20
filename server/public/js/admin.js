@@ -1548,7 +1548,10 @@ async function carregarTabelaPedidos() {
       <td>${escapeHtml(FORMA_PAGAMENTO_LABEL[p.forma_pagamento] || p.forma_pagamento || '-')}</td>
       <td><select data-pedido-status="${p.id}">${Object.entries(STATUS_PEDIDO).map(([valor, rotulo]) => `<option value="${valor}" ${valor === p.status ? 'selected' : ''}>${rotulo}</option>`).join('')}</select></td>
       <td>${escapeHtml(p.criado_em)}</td>
-      <td><button class="btn pequeno" data-editar-pedido="${p.id}">Editar</button></td>
+      <td>
+        <button class="btn pequeno" data-editar-pedido="${p.id}">Editar</button>
+        ${EH_SUPERADMIN() ? `<button class="btn pequeno perigo" data-excluir-pedido="${p.id}">Excluir</button>` : ''}
+      </td>
     </tr>
   `).join('') || '<tr><td colspan="14">Nenhum pedido ainda.</td></tr>';
 
@@ -1559,6 +1562,13 @@ async function carregarTabelaPedidos() {
     } catch (e) { alert(e.message); }
   }));
   document.querySelectorAll('[data-editar-pedido]').forEach(b => b.addEventListener('click', () => abrirFormPedido(b.dataset.editarPedido)));
+  document.querySelectorAll('[data-excluir-pedido]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Excluir este pedido definitivamente? Essa ação não pode ser desfeita. Estoque reservado (se houver) será devolvido.')) return;
+    try {
+      await Api.del(`/api/gestao/pedidos/${b.dataset.excluirPedido}`);
+      carregarTabelaPedidos();
+    } catch (e) { alert(e.message); }
+  }));
 }
 
 function campoEndereco(prefixo, valores) {
@@ -1726,6 +1736,17 @@ async function abrirFormPedido(id) {
         · Valor final: <strong>${formatarMoeda(p.valor_final)}</strong>
       </p>
 
+      ${p.forma_pagamento !== 'combinar' && p.status === 'aguardando_pagamento' && !p.mp_preference_id ? `
+        <div class="card" style="border-color:var(--vermelho);margin-top:.8rem;">
+          <h4>Link de pagamento</h4>
+          ${p.erro_pagamento
+            ? `<p style="color:var(--vermelho);font-size:.85rem;"><strong>Falhou ao gerar:</strong> ${escapeHtml(p.erro_pagamento)}</p>`
+            : `<p style="font-size:.85rem;color:var(--texto-suave);">Este pedido ainda não tem link de pagamento do Mercado Pago.</p>`}
+          <button class="btn secundario" id="ped-gerar-link" style="border-color:var(--couro);color:var(--couro);">Gerar link de pagamento</button>
+          <p id="ped-gerar-link-msg" class="msg" style="display:none;"></p>
+        </div>
+      ` : ''}
+
       ${p.mp_payment_id && p.status === 'aguardando_pagamento' ? `
         <button class="btn secundario" id="ped-reconciliar" style="border-color:var(--couro);color:var(--couro);">Reconciliar pagamento agora</button>
         <p id="ped-reconciliar-msg" class="msg" style="display:none;"></p>
@@ -1836,6 +1857,19 @@ function ligarFormPedido(pedidoId) {
     await Api.put(`/api/gestao/pedidos/${pedidoId}/cupom`, { codigo: null });
     await recarregarFormPedido(pedidoId);
     carregarTabelaPedidos();
+  });
+
+  // ---- Gerar (ou tentar de novo) o link de pagamento ----
+  const btnGerarLink = document.getElementById('ped-gerar-link');
+  if (btnGerarLink) btnGerarLink.addEventListener('click', async () => {
+    const msg = document.getElementById('ped-gerar-link-msg');
+    msg.style.display = 'block'; msg.textContent = 'Gerando link no Mercado Pago...'; msg.className = 'msg';
+    try {
+      const r = await Api.post(`/api/gestao/pedidos/${pedidoId}/gerar-link`, {});
+      msg.textContent = `Link gerado! ${r.checkout_url}`; msg.className = 'msg sucesso';
+      await recarregarFormPedido(pedidoId);
+      carregarTabelaPedidos();
+    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; }
   });
 
   // ---- Reconciliar pagamento ----

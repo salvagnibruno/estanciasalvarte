@@ -87,4 +87,23 @@ async function consultarPagamento(paymentId) {
   return payment.get({ id: paymentId });
 }
 
-module.exports = { configurado, criarPreferencia, consultarPagamento };
+// O SDK do Mercado Pago (RestClient.fetch) joga fora o corpo de erro da API
+// direto — `throw await response.json()` — entao o que cai no catch NAO e' um
+// Error (nao tem stack, e .message pode nem existir dependendo do formato do
+// erro). Aqui a gente monta um texto legivel a partir do que a API mandou
+// (message/error/cause), com JSON bruto como ultimo recurso, pra' guardar em
+// pedidos.erro_pagamento e o superadmin conseguir ver a causa real sem
+// precisar de acesso ao log do servidor.
+function detalheErroMp(e) {
+  if (e && typeof e === 'object') {
+    const causas = Array.isArray(e.cause)
+      ? e.cause.map(c => (c && (c.description || c.code)) || JSON.stringify(c)).join('; ')
+      : null;
+    const partes = [e.message, e.error, causas].filter(Boolean);
+    if (partes.length) return partes.join(' — ');
+    try { return JSON.stringify(e); } catch { /* segue pro fallback */ }
+  }
+  return String((e && e.message) || e || 'Erro desconhecido.');
+}
+
+module.exports = { configurado, criarPreferencia, consultarPagamento, detalheErroMp };

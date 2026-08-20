@@ -220,6 +220,7 @@ async function migrar(db) {
 
   // ---------- pedidos: prazo de pagamento, reserva de estoque, cancelamento, nota fiscal ----------
   if (await adicionarColuna(db, 'pedidos', 'expira_em', 'TEXT')) mudancas.push('pedidos.expira_em');
+  if (await adicionarColuna(db, 'pedidos', 'erro_pagamento', 'TEXT')) mudancas.push('pedidos.erro_pagamento');
   if (await adicionarColuna(db, 'encomendas', 'pedido_id', 'INTEGER REFERENCES pedidos(id)')) mudancas.push('encomendas.pedido_id');
   if (await adicionarColuna(db, 'pedidos', 'estoque_reservado', 'INTEGER NOT NULL DEFAULT 0')) mudancas.push('pedidos.estoque_reservado');
   if (await adicionarColuna(db, 'pedidos', 'estoque_devolvido', 'INTEGER NOT NULL DEFAULT 0')) mudancas.push('pedidos.estoque_devolvido');
