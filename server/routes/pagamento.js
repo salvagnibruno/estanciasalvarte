@@ -43,6 +43,24 @@ function getClient() {
 // "Desistência" no mesmo momento.
 const VALIDADE_LINK_MS = 60 * 60 * 1000;
 
+// Payer completo (nome/sobrenome separados, telefone com DDD, CPF) — a
+// documentacao do Mercado Pago recomenda mandar isso pra' agilizar o
+// checkout, e pagamento no Brasil (Pix em especial) tem exigencia crescente
+// de identificacao do pagador para compliance. So' usamos dado que o
+// checkout ja' coleta (nunca inventamos nada).
+function payerDoPedido(pedido) {
+  const partesNome = String(pedido.nome_cliente || '').trim().split(/\s+/).filter(Boolean);
+  const foneDigitos = String(pedido.telefone_cliente || '').replace(/\D/g, '');
+  const cpfDigitos = String(pedido.cpf_cliente || '').replace(/\D/g, '');
+  return {
+    name: partesNome[0] || undefined,
+    surname: partesNome.slice(1).join(' ') || undefined,
+    email: pedido.email_cliente || undefined,
+    phone: foneDigitos.length >= 10 ? { area_code: foneDigitos.slice(0, 2), number: foneDigitos.slice(2) } : undefined,
+    identification: cpfDigitos.length === 11 ? { type: 'CPF', number: cpfDigitos } : undefined
+  };
+}
+
 async function criarPreferencia(pedido, itens, baseUrl) {
   const client = getClient();
   if (!client) return null;
@@ -71,7 +89,7 @@ async function criarPreferencia(pedido, itens, baseUrl) {
   const resposta = await preference.create({
     body: {
       items: itensMp,
-      payer: { name: pedido.nome_cliente, email: pedido.email_cliente || undefined },
+      payer: payerDoPedido(pedido),
       external_reference: String(pedido.id),
       back_urls: {
         success: `${baseUrl}/pedido-confirmado.html?pedido=${pedido.id}`,
