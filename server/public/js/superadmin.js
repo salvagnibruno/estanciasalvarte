@@ -61,11 +61,11 @@ async function secaoUsuarios() {
       <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Permissões</th><th>Status</th><th>Criado em</th><th></th></tr></thead>
       <tbody>${usuarios.map(u => `
         <tr>
-          <td>${escapeHtml(u.nome)}</td><td>${escapeHtml(u.email)}</td><td>${u.papel}</td>
-          <td>${permissoesDoUsuarioHtml(u)}</td>
-          <td>${u.ativo ? '<span class="badge ok">Ativo</span>' : '<span class="badge indisponivel">Inativo</span>'}</td>
-          <td>${escapeHtml(u.criado_em)}</td>
-          <td>${u.papel !== 'superadmin' ? `<button class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" data-user-toggle="${u.id}" data-ativo="${u.ativo ? 1 : 0}">${u.ativo ? 'Desativar' : 'Ativar'}</button>` : '—'}</td>
+          <td data-label="Nome">${escapeHtml(u.nome)}</td><td data-label="E-mail">${escapeHtml(u.email)}</td><td data-label="Papel">${u.papel}</td>
+          <td data-label="Permissões">${permissoesDoUsuarioHtml(u)}</td>
+          <td data-label="Status">${u.ativo ? '<span class="badge ok">Ativo</span>' : '<span class="badge indisponivel">Inativo</span>'}</td>
+          <td data-label="Criado em">${escapeHtml(u.criado_em)}</td>
+          <td data-label="">${u.papel !== 'superadmin' ? `<button class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" data-user-toggle="${u.id}" data-ativo="${u.ativo ? 1 : 0}">${u.ativo ? 'Desativar' : 'Ativar'}</button>` : '—'}</td>
         </tr>
       `).join('')}</tbody>
     </table></div>
@@ -164,7 +164,7 @@ async function secaoRelatorios() {
       <h3>📈 Funil por produto — visualizações → carrinho → venda</h3>
       <div class="tabela-wrap"><table>
         <thead><tr><th>Produto</th><th>Visualizações</th><th>Adições ao carrinho</th><th>Unidades vendidas</th></tr></thead>
-        <tbody>${funil.map(f => `<tr><td>${escapeHtml(f.nome)}</td><td>${f.visualizacoes}</td><td>${f.adicoes_carrinho}</td><td>${f.unidades_vendidas}</td></tr>`).join('') || '<tr><td colspan="4">Sem dados.</td></tr>'}</tbody>
+        <tbody>${funil.map(f => `<tr><td data-label="Produto">${escapeHtml(f.nome)}</td><td data-label="Visualizações">${f.visualizacoes}</td><td data-label="Adições ao carrinho">${f.adicoes_carrinho}</td><td data-label="Unidades vendidas">${f.unidades_vendidas}</td></tr>`).join('') || '<tr><td colspan="4">Sem dados.</td></tr>'}</tbody>
       </table></div>
     </div>
   `;
@@ -272,13 +272,13 @@ async function secaoCupons(cupomEmEdicao) {
       <thead><tr><th>Código</th><th>Desconto</th><th>Produtos</th><th>Validade</th><th>Usos</th><th>Status</th><th>Ações</th></tr></thead>
       <tbody>${cupons.map(c => `
         <tr>
-          <td><strong>${escapeHtml(c.codigo)}</strong></td>
-          <td>${c.tipo === 'percentual' ? c.valor + '%' : formatarMoeda(c.valor)}</td>
-          <td>${escapeHtml(produtosCupomTexto(c))}</td>
-          <td>${validadeCupomTexto(c)}</td>
-          <td>${usosCupomTexto(c)}</td>
-          <td>${statusCupom(c)}</td>
-          <td>
+          <td data-label="Código"><strong>${escapeHtml(c.codigo)}</strong></td>
+          <td data-label="Desconto">${c.tipo === 'percentual' ? c.valor + '%' : formatarMoeda(c.valor)}</td>
+          <td data-label="Produtos">${escapeHtml(produtosCupomTexto(c))}</td>
+          <td data-label="Validade">${validadeCupomTexto(c)}</td>
+          <td data-label="Usos">${usosCupomTexto(c)}</td>
+          <td data-label="Status">${statusCupom(c)}</td>
+          <td data-label="Ações">
             <button class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" data-cupom-editar="${c.id}">Editar</button>
             <button class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" data-cupom="${c.id}" data-ativo="${c.ativo ? 1 : 0}">${c.ativo ? 'Desativar' : 'Ativar'}</button>
           </td>
@@ -399,11 +399,11 @@ async function secaoSite(avisoEmEdicao) {
       <thead><tr><th>Título</th><th>Mensagem</th><th>Período</th><th>Status</th><th>Ações</th></tr></thead>
       <tbody>${avisos.map(a => `
         <tr>
-          <td><strong>${escapeHtml(a.titulo)}</strong></td>
-          <td>${escapeHtml(a.mensagem || '-')}</td>
-          <td>${periodoAvisoTexto(a)}</td>
-          <td>${statusAviso(a)}</td>
-          <td>
+          <td data-label="Título"><strong>${escapeHtml(a.titulo)}</strong></td>
+          <td data-label="Mensagem">${escapeHtml(a.mensagem || '-')}</td>
+          <td data-label="Período">${periodoAvisoTexto(a)}</td>
+          <td data-label="Status">${statusAviso(a)}</td>
+          <td data-label="Ações">
             <button class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" data-aviso-editar="${a.id}">Editar</button>
             <button class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" data-aviso-toggle="${a.id}" data-ativo="${a.ativo ? 1 : 0}">${a.ativo ? 'Desativar' : 'Ativar'}</button>
             <button class="btn pequeno secundario" style="border-color:var(--vermelho);color:var(--vermelho);" data-aviso-excluir="${a.id}">Excluir</button>
@@ -510,10 +510,10 @@ async function secaoLinhas(linhaEmEdicao) {
       <thead><tr><th>Ordem</th><th>Nome</th><th>Produtos</th><th>Ações</th></tr></thead>
       <tbody>${linhas.map(l => `
         <tr>
-          <td>${l.ordem}</td>
-          <td><strong>${escapeHtml(l.nome)}</strong></td>
-          <td>${l.total_produtos ?? '-'}</td>
-          <td>
+          <td data-label="Ordem">${l.ordem}</td>
+          <td data-label="Nome"><strong>${escapeHtml(l.nome)}</strong></td>
+          <td data-label="Produtos">${l.total_produtos ?? '-'}</td>
+          <td data-label="Ações">
             <button class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" data-linha-editar="${l.id}">Editar</button>
             <button class="btn pequeno secundario" style="border-color:var(--vermelho);color:var(--vermelho);" data-linha-excluir="${l.id}">Excluir</button>
           </td>

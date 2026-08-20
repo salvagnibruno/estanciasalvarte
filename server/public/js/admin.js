@@ -9,6 +9,12 @@ const PRODUTOS_MARCADOS = new Set();
 // Ultima simulacao de reajuste (parametros + resultado). O "Aplicar" repete
 // exatamente estes parametros; qualquer mexida nos campos zera isto.
 let REAJUSTE_SIMULACAO = null;
+// Formulario de produto tem alteracao nao salva desde que foi aberto/salvo
+// pela ultima vez — usado pra' avisar antes de minimizar ou cancelar.
+let PF_SUJO = false;
+// Salvar (no minimizar) reabre o formulario do zero (abrirFormProduto de
+// novo); esta flag diz pra' ele minimizar sozinho assim que reabrir.
+let PF_MINIMIZAR_AO_REABRIR = false;
 
 async function iniciarPainel() {
   USUARIO = await Api.get('/api/auth/me');
@@ -45,6 +51,35 @@ const SECOES = {
   agendamentos: secaoAgendamentos,
   encomendas: secaoEncomendas
 };
+
+// Expandir/recolher os campos secundários de uma linha de tabela em tela
+// estreita (ver .tabela-wrap table td.col-secundaria no CSS). Um listener só,
+// por delegação: cobre toda tabela que use o padrão, mesmo recém-renderizada.
+document.addEventListener('click', (e) => {
+  const botao = e.target.closest('.btn-expandir-linha');
+  if (!botao) return;
+  const linha = botao.closest('tr');
+  const expandida = linha.classList.toggle('linha-expandida');
+  botao.textContent = expandida ? '▴ Ver menos' : '▾ Ver mais';
+});
+
+// Marca o formulario de produto como "sujo" a partir de qualquer digitacao ou
+// selecao. Por delegacao no document (nao no wrap): a secao de Produtos so'
+// cria a div #form-produto-wrap quando e' aberta, entao um listener preso
+// nela direto, no carregamento do script, nunca acharia o elemento.
+['input', 'change'].forEach(evento => {
+  document.addEventListener(evento, (e) => {
+    if (e.target.closest('#form-produto-wrap')) PF_SUJO = true;
+  });
+});
+
+function minimizarFormProduto(minimizar) {
+  const corpo = document.getElementById('pf-corpo');
+  const botao = document.getElementById('pf-minimizar');
+  if (!corpo || !botao) return;
+  corpo.style.display = minimizar ? 'none' : '';
+  botao.textContent = minimizar ? '▼ Expandir' : '▲ Minimizar';
+}
 
 const EH_SUPERADMIN = () => USUARIO && USUARIO.papel === 'superadmin';
 
@@ -128,29 +163,30 @@ async function carregarTabelaProdutos() {
   const lista = catFiltro ? todos.filter(p => p.categoria_slug === catFiltro) : todos;
   document.getElementById('tbody-produtos').innerHTML = lista.map(p => `
     <tr>
-      ${podeReajustar ? `<td class="col-marcar"><input type="checkbox" class="marcar-produto" data-id="${p.id}" ${PRODUTOS_MARCADOS.has(p.id) ? 'checked' : ''}></td>` : ''}
-      <td><span class="mini-foto ${p.imagem_url ? '' : 'vazia'}" title="${p.imagem_url ? 'Com foto' : 'Sem foto cadastrada'}">${p.imagem_url
+      ${podeReajustar ? `<td class="col-marcar" data-label="Marcar"><input type="checkbox" class="marcar-produto" data-id="${p.id}" ${PRODUTOS_MARCADOS.has(p.id) ? 'checked' : ''}></td>` : ''}
+      <td data-label="Foto"><span class="mini-foto ${p.imagem_url ? '' : 'vazia'}" title="${p.imagem_url ? 'Com foto' : 'Sem foto cadastrada'}">${p.imagem_url
         ? `<img src="${escapeHtml(p.imagem_url)}" alt="" loading="lazy">`
         : '📷'}</span></td>
-      <td>${escapeHtml(p.codigo || '-')}</td>
-      <td>${escapeHtml(p.nome)}</td>
-      <td>${escapeHtml(p.categoria_nome)}
+      <td class="col-secundaria" data-label="Código">${escapeHtml(p.codigo || '-')}</td>
+      <td data-label="Nome">${escapeHtml(p.nome)}</td>
+      <td class="col-secundaria" data-label="Categoria">${escapeHtml(p.categoria_nome)}
         <br><small style="color:var(--texto-suave);">${
           p.publico === 'masculino' ? '♂ Masculino' : p.publico === 'feminino' ? '♀ Feminino' : 'Unissex'}</small></td>
-      ${EH_SUPERADMIN() ? `<td>${formatarMoeda(p.custo)} <small style="color:var(--texto-suave);">(${p.custo_fonte})</small></td>` : ''}
-      <td>${p.em_promocao
+      ${EH_SUPERADMIN() ? `<td class="col-secundaria" data-label="Custo">${formatarMoeda(p.custo)} <small style="color:var(--texto-suave);">(${p.custo_fonte})</small></td>` : ''}
+      <td data-label="Preço">${p.em_promocao
         ? `<s style="color:var(--texto-suave);">${formatarMoeda(p.preco_venda)}</s> <strong>${formatarMoeda(p.preco_promocional)}</strong>`
         : formatarMoeda(p.preco_venda)}</td>
-      <td>${p.tipo_estoque === 'sob_encomenda' ? 'Sob encomenda' : p.estoque_total}</td>
-      <td>${p.ativo ? '<span class="badge ok">Ativo</span>' : '<span class="badge indisponivel">Inativo</span>'}</td>
-      <td><button class="btn pequeno ${p.destaque ? '' : 'secundario'}" style="${p.destaque ? '' : 'border-color:#999;color:#666;'}" data-destaque="${p.id}" data-valor="${p.destaque ? 1 : 0}" title="Aparece no carrossel da home">${p.destaque ? '★ Em destaque' : '☆ Destacar'}</button></td>
-      <td style="white-space:nowrap;">
+      <td data-label="Estoque">${p.tipo_estoque === 'sob_encomenda' ? 'Sob encomenda' : p.estoque_total}</td>
+      <td data-label="Status">${p.ativo ? '<span class="badge ok">Ativo</span>' : '<span class="badge indisponivel">Inativo</span>'}</td>
+      <td class="col-secundaria" data-label="Vitrine"><button class="btn pequeno ${p.destaque ? '' : 'secundario'}" style="${p.destaque ? '' : 'border-color:#999;color:#666;'}" data-destaque="${p.id}" data-valor="${p.destaque ? 1 : 0}" title="Aparece no carrossel da home">${p.destaque ? '★ Em destaque' : '☆ Destacar'}</button></td>
+      <td data-label="Ações" style="white-space:nowrap;">
         <button class="btn pequeno" data-editar="${p.id}">Editar</button>
         <button class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" data-toggle="${p.id}" data-ativo="${p.ativo ? 1 : 0}">${p.ativo ? 'Inativar' : 'Ativar'}</button>
         <button class="btn pequeno perigo" data-excluir="${p.id}">Excluir</button>
       </td>
+      <td class="col-expandir" data-label=""><button type="button" class="btn-expandir-linha">▾ Ver mais</button></td>
     </tr>
-  `).join('') || `<tr><td colspan="${EH_SUPERADMIN() ? 11 : 9}">Nenhum produto.</td></tr>`;
+  `).join('') || `<tr><td colspan="${EH_SUPERADMIN() ? 12 : 10}">Nenhum produto.</td></tr>`;
 
   if (podeReajustar) ligarMarcacaoProdutos();
 
@@ -177,7 +213,11 @@ async function abrirFormProduto(id) {
   const wrap = document.getElementById('form-produto-wrap');
   wrap.innerHTML = `
     <div class="card">
-      <h3>${p ? 'Editar produto' : 'Novo produto'}</h3>
+      <div class="flex entre" style="align-items:center;">
+        <h3 style="margin:0;">${p ? 'Editar produto' : 'Novo produto'}</h3>
+        <button type="button" class="btn pequeno secundario" id="pf-minimizar" style="border-color:var(--couro);color:var(--couro);">▲ Minimizar</button>
+      </div>
+      <div id="pf-corpo">
       <div class="linha-dupla">
         <div><label>Código</label><input id="pf-codigo" value="${p ? escapeHtml(p.codigo || '') : ''}"></div>
         <div><label>Categoria</label><select id="pf-categoria">${CATEGORIAS_CACHE.map(c => `<option value="${c.id}" ${p && p.categoria_id === c.id ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}</select></div>
@@ -250,10 +290,28 @@ async function abrirFormProduto(id) {
       <p id="pf-msg" class="msg" style="display:none;"></p>
 
       ${p ? `<hr><h4>Estoque por tamanho/cor</h4><div id="pf-estoque"></div>` : ''}
+      </div>
     </div>
   `;
 
-  document.getElementById('pf-cancelar').addEventListener('click', () => { wrap.innerHTML = ''; });
+  PF_SUJO = false;
+  if (PF_MINIMIZAR_AO_REABRIR) { PF_MINIMIZAR_AO_REABRIR = false; minimizarFormProduto(true); }
+  document.getElementById('pf-minimizar').addEventListener('click', () => {
+    const corpo = document.getElementById('pf-corpo');
+    if (corpo.style.display === 'none') { minimizarFormProduto(false); return; }
+    if (!PF_SUJO) { minimizarFormProduto(true); return; }
+    const querSalvar = confirm('Este produto tem alterações não salvas.\n\n'
+      + 'OK = salvar agora antes de minimizar.\n'
+      + 'Cancelar = minimizar sem salvar (as alterações continuam aqui, só ficam escondidas).');
+    if (querSalvar) { PF_MINIMIZAR_AO_REABRIR = true; document.getElementById('pf-salvar').click(); }
+    else minimizarFormProduto(true);
+  });
+
+  document.getElementById('pf-cancelar').addEventListener('click', () => {
+    if (PF_SUJO && !confirm('Este produto tem alterações não salvas. Elas serão perdidas se você cancelar agora. Cancelar mesmo assim?')) return;
+    wrap.innerHTML = '';
+    PF_SUJO = false;
+  });
   document.getElementById('pf-salvar').addEventListener('click', () => salvarProduto(p ? p.id : null));
   if (p) ligarUploadFoto(p);
   if (p && p.cores.length) ligarFotosDasCores(p);
@@ -602,6 +660,11 @@ async function salvarProduto(id) {
   } catch (e) {
     msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block';
     botao.disabled = false;
+    // Salvar falhou: o formulario nao vai reabrir sozinho (so' recarregarProdutoNaTela
+    // faz isso, e ela nao roda aqui), entao a intencao de minimizar-apos-salvar
+    // fica cancelada — senao ela ficaria pendurada e minimizaria o proximo
+    // produto que o admin abrir, sem relacao nenhuma com este.
+    PF_MINIMIZAR_AO_REABRIR = false;
   }
 }
 
@@ -917,13 +980,13 @@ async function secaoCategorias(aviso) {
       <thead><tr><th>Ordem</th><th>Nome</th><th>Endereço</th><th>Descrição</th><th>Produtos</th><th>Ações</th></tr></thead>
       <tbody>${categorias.map(c => `
         <tr data-linha-categoria="${c.id}" ${c.id === CATEGORIA_EM_EDICAO ? 'style="background:var(--creme);"' : ''}>
-          <td>${c.ordem}</td>
-          <td><strong>${escapeHtml(c.nome)}</strong></td>
-          <td><code style="font-size:.82rem;">${escapeHtml(c.slug)}</code></td>
-          <td>${escapeHtml(c.descricao || '—')}</td>
-          <td>${c.total_produtos}${c.total_produtos !== c.total_ativos
+          <td data-label="Ordem">${c.ordem}</td>
+          <td data-label="Nome"><strong>${escapeHtml(c.nome)}</strong></td>
+          <td data-label="Endereço"><code style="font-size:.82rem;">${escapeHtml(c.slug)}</code></td>
+          <td data-label="Descrição">${escapeHtml(c.descricao || '—')}</td>
+          <td data-label="Produtos">${c.total_produtos}${c.total_produtos !== c.total_ativos
             ? ` <small style="color:var(--texto-suave);">(${c.total_ativos} ativo[s])</small>` : ''}</td>
-          <td style="white-space:nowrap;">
+          <td data-label="Ações" style="white-space:nowrap;">
             <button class="btn pequeno" data-editar-categoria="${c.id}">Editar</button>
             <button class="btn pequeno perigo" data-excluir-categoria="${c.id}">Excluir</button>
           </td>
@@ -1433,13 +1496,13 @@ async function secaoClientes() {
       <thead><tr><th>#</th><th>Nome</th><th>E-mail</th><th>Telefone</th><th>Pedidos</th><th>Total gasto</th><th>Última compra</th></tr></thead>
       <tbody>${clientes.map(c => `
         <tr>
-          <td>${c.id}</td>
-          <td>${escapeHtml(c.nome)}</td>
-          <td>${escapeHtml(c.email || '-')}</td>
-          <td>${escapeHtml(c.telefone || '-')}</td>
-          <td>${c.total_pedidos}</td>
-          <td>${formatarMoeda(c.total_gasto)}</td>
-          <td>${escapeHtml(c.ultima_compra || '-')}</td>
+          <td data-label="#">${c.id}</td>
+          <td data-label="Nome">${escapeHtml(c.nome)}</td>
+          <td data-label="E-mail">${escapeHtml(c.email || '-')}</td>
+          <td data-label="Telefone">${escapeHtml(c.telefone || '-')}</td>
+          <td data-label="Pedidos">${c.total_pedidos}</td>
+          <td data-label="Total gasto">${formatarMoeda(c.total_gasto)}</td>
+          <td data-label="Última compra">${escapeHtml(c.ultima_compra || '-')}</td>
         </tr>
       `).join('') || '<tr><td colspan="7">Nenhum cliente cadastrado ainda.</td></tr>'}</tbody>
     </table></div>
@@ -1467,15 +1530,15 @@ async function secaoCsat() {
       <thead><tr><th>Pedido</th><th>Cliente</th><th>Preços</th><th>Site</th><th>Geral</th><th>1ª compra</th><th>Recomenda</th><th>Comentário</th><th>Enviado em</th></tr></thead>
       <tbody>${respostas.map(r => `
         <tr>
-          <td>${escapeHtml(r.pedido_codigo || r.pedido_id)}</td>
-          <td>${escapeHtml(r.nome_cliente || '-')}</td>
-          <td title="${r.nota_precos}">${estrelas(r.nota_precos)}</td>
-          <td title="${r.nota_site}">${estrelas(r.nota_site)}</td>
-          <td title="${r.nota_geral}">${estrelas(r.nota_geral)}</td>
-          <td>${r.primeira_compra === 1 ? 'Sim' : r.primeira_compra === 0 ? 'Não' : '-'}</td>
-          <td>${r.recomendaria === 1 ? 'Sim' : r.recomendaria === 0 ? 'Não' : '-'}</td>
-          <td>${escapeHtml(r.comentario || '-')}</td>
-          <td>${escapeHtml(r.criado_em)}</td>
+          <td data-label="Pedido">${escapeHtml(r.pedido_codigo || r.pedido_id)}</td>
+          <td data-label="Cliente">${escapeHtml(r.nome_cliente || '-')}</td>
+          <td data-label="Preços" title="${r.nota_precos}">${estrelas(r.nota_precos)}</td>
+          <td data-label="Site" title="${r.nota_site}">${estrelas(r.nota_site)}</td>
+          <td data-label="Geral" title="${r.nota_geral}">${estrelas(r.nota_geral)}</td>
+          <td data-label="1ª compra">${r.primeira_compra === 1 ? 'Sim' : r.primeira_compra === 0 ? 'Não' : '-'}</td>
+          <td data-label="Recomenda">${r.recomendaria === 1 ? 'Sim' : r.recomendaria === 0 ? 'Não' : '-'}</td>
+          <td data-label="Comentário">${escapeHtml(r.comentario || '-')}</td>
+          <td data-label="Enviado em">${escapeHtml(r.criado_em)}</td>
         </tr>
       `).join('') || '<tr><td colspan="9">Nenhuma avaliação recebida ainda.</td></tr>'}</tbody>
     </table></div>
@@ -1535,25 +1598,26 @@ async function carregarTabelaPedidos() {
   const pedidos = await Api.get('/api/gestao/pedidos');
   document.getElementById('tbody-pedidos').innerHTML = pedidos.map(p => `
     <tr class="${p.status === 'desistencia' ? 'linha-desistencia' : ''}">
-      <td><strong>${escapeHtml(p.codigo || p.id)}</strong></td>
-      <td>${escapeHtml(p.nome_cliente)}<br><span style="font-size:.78rem;color:var(--texto-suave);">${escapeHtml(p.email_cliente || '-')}</span></td>
-      <td>${escapeHtml(formatarCpfExibicao(p.cpf_cliente))}</td>
-      <td>${escapeHtml(p.telefone_cliente || '-')}</td>
-      <td style="max-width:220px;">${escapeHtml(enderecoResidencialTexto(p))}</td>
-      <td style="max-width:220px;">${escapeHtml(enderecoEntregaTexto(p))}</td>
-      <td>${formatarMoeda(p.total)}</td>
-      <td>${p.valor_desconto > 0 ? '− ' + formatarMoeda(p.valor_desconto) : '-'}</td>
-      <td>${escapeHtml(p.cupom || '-')}</td>
-      <td><strong>${formatarMoeda(p.valor_final)}</strong></td>
-      <td>${escapeHtml(FORMA_PAGAMENTO_LABEL[p.forma_pagamento] || p.forma_pagamento || '-')}</td>
-      <td><select data-pedido-status="${p.id}">${Object.entries(STATUS_PEDIDO).map(([valor, rotulo]) => `<option value="${valor}" ${valor === p.status ? 'selected' : ''}>${rotulo}</option>`).join('')}</select></td>
-      <td>${escapeHtml(p.criado_em)}</td>
-      <td>
+      <td data-label="Código"><strong>${escapeHtml(p.codigo || p.id)}</strong></td>
+      <td data-label="Cliente">${escapeHtml(p.nome_cliente)}<br><span style="font-size:.78rem;color:var(--texto-suave);">${escapeHtml(p.email_cliente || '-')}</span></td>
+      <td class="col-secundaria" data-label="CPF">${escapeHtml(formatarCpfExibicao(p.cpf_cliente))}</td>
+      <td class="col-secundaria" data-label="Telefone">${escapeHtml(p.telefone_cliente || '-')}</td>
+      <td class="col-secundaria" data-label="Endereço residencial" style="max-width:220px;">${escapeHtml(enderecoResidencialTexto(p))}</td>
+      <td class="col-secundaria" data-label="Entrega" style="max-width:220px;">${escapeHtml(enderecoEntregaTexto(p))}</td>
+      <td class="col-secundaria" data-label="Total">${formatarMoeda(p.total)}</td>
+      <td class="col-secundaria" data-label="Desconto">${p.valor_desconto > 0 ? '− ' + formatarMoeda(p.valor_desconto) : '-'}</td>
+      <td class="col-secundaria" data-label="Cupom">${escapeHtml(p.cupom || '-')}</td>
+      <td data-label="Valor final"><strong>${formatarMoeda(p.valor_final)}</strong></td>
+      <td class="col-secundaria" data-label="Pagamento">${escapeHtml(FORMA_PAGAMENTO_LABEL[p.forma_pagamento] || p.forma_pagamento || '-')}</td>
+      <td data-label="Status"><select data-pedido-status="${p.id}">${Object.entries(STATUS_PEDIDO).map(([valor, rotulo]) => `<option value="${valor}" ${valor === p.status ? 'selected' : ''}>${rotulo}</option>`).join('')}</select></td>
+      <td class="col-secundaria" data-label="Data">${escapeHtml(p.criado_em)}</td>
+      <td data-label="Ações">
         <button class="btn pequeno" data-editar-pedido="${p.id}">Editar</button>
         ${EH_SUPERADMIN() ? `<button class="btn pequeno perigo" data-excluir-pedido="${p.id}">Excluir</button>` : ''}
       </td>
+      <td class="col-expandir" data-label=""><button type="button" class="btn-expandir-linha">▾ Ver mais</button></td>
     </tr>
-  `).join('') || '<tr><td colspan="14">Nenhum pedido ainda.</td></tr>';
+  `).join('') || '<tr><td colspan="15">Nenhum pedido ainda.</td></tr>';
 
   document.querySelectorAll('[data-pedido-status]').forEach(sel => sel.addEventListener('change', async () => {
     try {
@@ -1647,13 +1711,13 @@ function blocoNotaFiscalHtml(p) {
 function linhaItemPedidoHtml(item) {
   return `
     <tr data-item-row="${item.id}">
-      <td><select class="ped-item-produto" data-item="${item.id}">${PRODUTOS_CACHE_PEDIDOS.map(prod => `<option value="${prod.id}" ${prod.id === item.produto_id ? 'selected' : ''}>${escapeHtml(prod.nome)}</option>`).join('')}</select></td>
-      <td><input class="ped-item-tamanho" data-item="${item.id}" value="${escapeHtml(item.tamanho || '')}" style="width:70px;"></td>
-      <td><input class="ped-item-cor" data-item="${item.id}" value="${escapeHtml(item.cor || '')}" style="width:80px;"></td>
-      <td><input type="number" min="1" class="ped-item-qtd" data-item="${item.id}" value="${item.quantidade}" style="width:55px;"></td>
-      <td><input type="number" step="0.01" min="0" class="ped-item-preco" data-item="${item.id}" value="${item.preco_unitario}" style="width:85px;"></td>
-      <td>${formatarMoeda(item.preco_unitario * item.quantidade)}</td>
-      <td style="white-space:nowrap;">
+      <td data-label="Produto"><select class="ped-item-produto" data-item="${item.id}">${PRODUTOS_CACHE_PEDIDOS.map(prod => `<option value="${prod.id}" ${prod.id === item.produto_id ? 'selected' : ''}>${escapeHtml(prod.nome)}</option>`).join('')}</select></td>
+      <td data-label="Tamanho"><input class="ped-item-tamanho" data-item="${item.id}" value="${escapeHtml(item.tamanho || '')}" style="width:70px;"></td>
+      <td data-label="Cor"><input class="ped-item-cor" data-item="${item.id}" value="${escapeHtml(item.cor || '')}" style="width:80px;"></td>
+      <td data-label="Qtd"><input type="number" min="1" class="ped-item-qtd" data-item="${item.id}" value="${item.quantidade}" style="width:55px;"></td>
+      <td data-label="Preço unit."><input type="number" step="0.01" min="0" class="ped-item-preco" data-item="${item.id}" value="${item.preco_unitario}" style="width:85px;"></td>
+      <td data-label="Total">${formatarMoeda(item.preco_unitario * item.quantidade)}</td>
+      <td data-label="Ações" style="white-space:nowrap;">
         <button class="btn pequeno secundario" data-item-salvar="${item.id}">Salvar</button>
         <button class="btn pequeno perigo" data-item-remover="${item.id}">Remover</button>
       </td>
@@ -1951,13 +2015,13 @@ async function secaoEncomendas() {
       <thead><tr><th>Produto</th><th>Tipo</th><th>Cliente</th><th>Telefone</th><th>Tam./Cor</th><th>Pedido</th><th>Status</th><th>Data</th></tr></thead>
       <tbody>${encomendas.map(e => `
         <tr>
-          <td>${escapeHtml(e.produto_nome)}</td>
-          <td>${e.tipo === 'encomenda' ? 'Encomenda' : 'Avisar estoque'}</td>
-          <td>${escapeHtml(e.nome)}</td><td>${escapeHtml(e.telefone || '-')}</td>
-          <td>${escapeHtml(e.tamanho || '-')} / ${escapeHtml(e.cor || '-')}</td>
-          <td>${e.pedido_id ? `#${e.pedido_id}` : '-'}</td>
-          <td><select data-enc-status="${e.id}">${STATUS.map(s => `<option value="${s}" ${s === e.status ? 'selected' : ''}>${s}</option>`).join('')}</select></td>
-          <td>${escapeHtml(e.criado_em)}</td>
+          <td data-label="Produto">${escapeHtml(e.produto_nome)}</td>
+          <td data-label="Tipo">${e.tipo === 'encomenda' ? 'Encomenda' : 'Avisar estoque'}</td>
+          <td data-label="Cliente">${escapeHtml(e.nome)}</td><td data-label="Telefone">${escapeHtml(e.telefone || '-')}</td>
+          <td data-label="Tam./Cor">${escapeHtml(e.tamanho || '-')} / ${escapeHtml(e.cor || '-')}</td>
+          <td data-label="Pedido">${e.pedido_id ? `#${e.pedido_id}` : '-'}</td>
+          <td data-label="Status"><select data-enc-status="${e.id}">${STATUS.map(s => `<option value="${s}" ${s === e.status ? 'selected' : ''}>${s}</option>`).join('')}</select></td>
+          <td data-label="Data">${escapeHtml(e.criado_em)}</td>
         </tr>
       `).join('') || '<tr><td colspan="8">Nada por aqui.</td></tr>'}</tbody>
     </table></div>

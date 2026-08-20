@@ -179,6 +179,45 @@ th, td { padding: .55rem .6rem; border-bottom: 1px solid var(--creme-escuro); te
 th { background: var(--creme-escuro); font-size: .78rem; text-transform: uppercase; letter-spacing: .3px; }
 tr:hover td { background: #fbf7ec; }
 .tabela-wrap { overflow-x: auto; background: #fff; border-radius: var(--raio); box-shadow: var(--sombra); border: 1px solid var(--creme-escuro); }
+/* O botão "Ver mais"/"Ver menos" só existe pro layout empilhado (mobile) —
+   numa tabela normal todas as colunas já estão visíveis, então a célula fica
+   escondida por padrão e só aparece dentro do media query lá embaixo. */
+.tabela-wrap table td.col-expandir { display: none; }
+
+/* Tabela do painel vira uma pilha de "cartões" em tela estreita — sem cursor
+   horizontal. Cada <td> carrega data-label="<nome da coluna>" (o CSS usa isso
+   como rótulo do campo empilhado); <td> sem rótulo (ex.: só um botão) usa
+   data-label="" e o rótulo simplesmente não aparece.
+   Colunas marcadas com .col-secundaria ficam escondidas até o cartão ser
+   expandido pelo botão .btn-expandir-linha (ver admin.js). */
+@media (max-width: 760px) {
+  .tabela-wrap { overflow-x: visible; }
+  .tabela-wrap table thead { display: none; }
+  .tabela-wrap table, .tabela-wrap table tbody, .tabela-wrap table tr, .tabela-wrap table td {
+    display: block; width: 100%;
+  }
+  .tabela-wrap table tr {
+    border: 1px solid var(--creme-escuro); border-radius: var(--raio); margin: 0 0 .8rem; padding: .2rem .8rem;
+  }
+  .tabela-wrap table tr:hover td { background: none; }
+  .tabela-wrap table td {
+    display: flex; justify-content: space-between; align-items: center; gap: .8rem;
+    padding: .5rem 0; border-bottom: 1px dashed var(--creme-escuro); text-align: right;
+  }
+  .tabela-wrap table td:last-child { border-bottom: none; }
+  .tabela-wrap table td::before {
+    content: attr(data-label); font-weight: 700; color: var(--texto-suave); text-align: left;
+    font-size: .74rem; text-transform: uppercase; letter-spacing: .3px; flex-shrink: 0;
+  }
+  .tabela-wrap table td[data-label=""]::before { content: none; }
+  .tabela-wrap table td.col-secundaria { display: none; }
+  .tabela-wrap table tr.linha-expandida td.col-secundaria { display: flex; }
+  .tabela-wrap table td.col-expandir { justify-content: center; border-bottom: none; padding-top: .2rem; }
+  .btn-expandir-linha {
+    width: 100%; background: none; border: none; color: var(--verde); font-weight: 700;
+    font-size: .82rem; cursor: pointer; padding: .3rem;
+  }
+}
 /* Pedido em Desistência (prazo de pagamento vencido sem confirmação): destaque
    visual na tabela do admin para o vendedor bater o olho e retomar contato. */
 .linha-desistencia { background: #fbeceb; }

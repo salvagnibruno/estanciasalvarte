@@ -11,15 +11,25 @@ let mpClient = null;
 let Preference = null;
 let Payment = null;
 
+// .trim() de proposito: colar o token num campo de variavel de ambiente
+// (Render, Fly, etc.) facilmente entra com um espaco ou quebra de linha
+// grudado, e o header "Authorization: Bearer <token>" vira invalido sem
+// nenhum aviso visivel — a API do Mercado Pago devolve so um 403 generico
+// ("At least one policy returned UNAUTHORIZED"), sem indicar o motivo.
+function tokenConfigurado() {
+  return (process.env.MERCADOPAGO_ACCESS_TOKEN || '').trim();
+}
+
 function configurado() {
-  return !!process.env.MERCADOPAGO_ACCESS_TOKEN;
+  return !!tokenConfigurado();
 }
 
 function getClient() {
-  if (!configurado()) return null;
+  const token = tokenConfigurado();
+  if (!token) return null;
   if (!mpClient) {
     const { MercadoPagoConfig, Preference: Pref, Payment: Pay } = require('mercadopago');
-    mpClient = new MercadoPagoConfig({ accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN });
+    mpClient = new MercadoPagoConfig({ accessToken: token });
     Preference = Pref;
     Payment = Pay;
   }
@@ -94,16 +104,32 @@ async function consultarPagamento(paymentId) {
 // (message/error/cause), com JSON bruto como ultimo recurso, pra' guardar em
 // pedidos.erro_pagamento e o superadmin conseguir ver a causa real sem
 // precisar de acesso ao log do servidor.
+// "At least one policy returned UNAUTHORIZED" / PA_UNAUTHORIZED_RESULT_FROM_POLICIES
+// e' um 403 generico do "policy agent" do proprio Mercado Pago — nao diz o
+// motivo, mas na pratica costuma ser token de PRODUCAO invalido/revogado (ou
+// colado com espaco/quebra de linha a mais) ou a conta da loja ainda incompleta/
+// nao verificada no Mercado Pago (falta cadastro bancario, documento, etc.).
+// Nenhum dos dois da' pra' corrigir por codigo — o dono da loja precisa checar
+// no proprio painel do Mercado Pago.
+const DICA_POLICY_UNAUTHORIZED = 'Isto costuma acontecer quando o Access Token '
+  + 'de produção está errado/revogado ou o cadastro da loja no Mercado Pago '
+  + 'ainda não está completo (verificação de identidade/conta bancária). '
+  + 'Gere um novo token de PRODUÇÃO em mercadopago.com.br/developers/panel e confira '
+  + 'se a conta não tem pendência de verificação.';
+
 function detalheErroMp(e) {
+  let texto;
   if (e && typeof e === 'object') {
     const causas = Array.isArray(e.cause)
       ? e.cause.map(c => (c && (c.description || c.code)) || JSON.stringify(c)).join('; ')
       : null;
     const partes = [e.message, e.error, causas].filter(Boolean);
-    if (partes.length) return partes.join(' — ');
-    try { return JSON.stringify(e); } catch { /* segue pro fallback */ }
+    if (partes.length) texto = partes.join(' — ');
+    else { try { texto = JSON.stringify(e); } catch { /* segue pro fallback */ } }
   }
-  return String((e && e.message) || e || 'Erro desconhecido.');
+  if (!texto) texto = String((e && e.message) || e || 'Erro desconhecido.');
+  if (/policy|unauthorized/i.test(texto)) texto += ' — ' + DICA_POLICY_UNAUTHORIZED;
+  return texto;
 }
 
 module.exports = { configurado, criarPreferencia, consultarPagamento, detalheErroMp };
