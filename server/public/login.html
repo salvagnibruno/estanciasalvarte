@@ -1,8 +1,9 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" style="background:#f7f0e1">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
 <title>Entrar — Estância Salvarte</title>
 <link rel="icon" href="/img/favicon.png">
 <link rel="stylesheet" href="/css/style.css">
@@ -51,6 +52,14 @@
 let modoRegistro = false;
 let emailPendenteConfirmacao = null;
 
+// Link de "voltar pra' onde eu estava" (ex.: e-mail de novo pedido manda pra'
+// /superadmin/index.html#pedidos) — só aceita caminho local (começa com "/"
+// e não com "//", que seria um jeito de mandar pra' outro site).
+const proximoDestino = (() => {
+  const bruto = new URLSearchParams(window.location.search).get('next');
+  return bruto && bruto.startsWith('/') && !bruto.startsWith('//') ? bruto : '/conta/index.html';
+})();
+
 document.getElementById('alternar-modo').addEventListener('click', (e) => {
   e.preventDefault();
   modoRegistro = !modoRegistro;
@@ -86,7 +95,7 @@ document.getElementById('btn-enviar').addEventListener('click', async () => {
       email: document.getElementById('f-email').value,
       senha: document.getElementById('f-senha').value
     });
-    window.location.href = '/conta/index.html';
+    window.location.href = proximoDestino;
   } catch (e) {
     // Conta existe mas ainda não confirmou o e-mail: manda direto para a
     // tela de código em vez de só mostrar um erro sem saída.
@@ -106,7 +115,7 @@ document.getElementById('btn-confirmar').addEventListener('click', async () => {
       email: emailPendenteConfirmacao,
       codigo: document.getElementById('f-codigo').value
     });
-    window.location.href = '/conta/index.html';
+    window.location.href = proximoDestino;
   } catch (e) {
     msg.textContent = e.message; msg.className = 'msg erro';
   }

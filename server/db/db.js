@@ -9,12 +9,42 @@ const { migrar } = require('./migrate');
 // sem eles, usa um arquivo local (bom para desenvolvimento, não precisa de
 // conta Turso). "file:" é um banco SQLite comum no disco, lido pelo mesmo
 // driver libsql.
-const DB_URL = process.env.TURSO_DATABASE_URL || `file:${path.join(__dirname, 'estancia.db')}`;
-const client = createClient(
-  process.env.TURSO_AUTH_TOKEN
-    ? { url: DB_URL, authToken: process.env.TURSO_AUTH_TOKEN }
-    : { url: DB_URL }
-);
+const TURSO_URL = process.env.TURSO_DATABASE_URL;
+const isRemoto = !!TURSO_URL;
+
+// RÉPLICA EMBARCADA: em produção, ler direto do Turso (client 100% remoto)
+// fazia CADA consulta (categorias, vitrine, carrinho, painel...) esperar uma
+// viagem de rede até o banco — isso é o que deixava o site inteiro lento,
+// principalmente em conexão móvel, já que uma única página faz várias
+// consultas em sequência. A "embedded replica" do libsql resolve isso: mantém
+// um arquivo SQLite local (replica.db), sincronizado em segundo plano com o
+// Turso. Leituras passam a ser locais (instantâneas); só a sincronização e as
+// escritas tocam a rede. Ver syncIfRemoto(), chamado após cada escrita.
+const REPLICA_PATH = path.join(__dirname, 'replica.db');
+const client = isRemoto
+  ? createClient({
+      url: `file:${REPLICA_PATH}`,
+      syncUrl: TURSO_URL,
+      authToken: process.env.TURSO_AUTH_TOKEN,
+      syncInterval: 60 // sincroniza sozinho a cada 60s, além da sincronização após escritas
+    })
+  // DB_PATH (ver fly.toml): aponta para o volume persistente (/data) em
+  // hospedagens como Fly.io. Sem ela, cai no arquivo dentro do repositório —
+  // correto só para desenvolvimento local. IMPORTANTE: antes desta correção,
+  // DB_PATH era definida no fly.toml mas nunca lida aqui, então o banco vivia
+  // dentro do contêiner e era descartado a cada deploy/reinício (schema,
+  // migração e catálogo inteiro eram refeitos do zero toda vez — lento e, na
+  // prática, apagava pedidos e alterações feitas em produção).
+  : createClient({ url: `file:${process.env.DB_PATH || path.join(__dirname, 'estancia.db')}` });
+
+// Chamado depois de toda escrita (INSERT/UPDATE/DELETE) para que a réplica
+// local reflita a mudança imediatamente — sem isso, uma leitura logo após
+// escrever (ex.: "meu pedido foi criado, mostra ele na tela") poderia não
+// encontrar o dado ainda, porque a réplica só sincronizaria no próximo
+// intervalo de 60s.
+async function syncIfRemoto() {
+  if (isRemoto) await client.sync();
+}
 
 // Em produção (banco fora do repositório) e ainda sem nenhuma tabela, importa
 // o estancia.db versionado no repo — assim o primeiro deploy já sobe com
@@ -51,6 +81,7 @@ async function importarBancoDoRepoSeVazio() {
     }
   }
   local.close();
+  await client.sync(); // reflete as linhas recem-importadas na replica local
   console.log(`[setup] Banco importado do repositório para o Turso (${dadosTabelas.length} tabela(s) copiadas).`);
 }
 
@@ -70,6 +101,7 @@ function prepareOn(executor) {
     all: async (...args) => (await executor.execute({ sql, args: normalizarArgs(args) })).rows,
     run: async (...args) => {
       const r = await executor.execute({ sql, args: normalizarArgs(args) });
+      await syncIfRemoto();
       return { lastInsertRowid: Number(r.lastInsertRowid), changes: r.rowsAffected };
     }
   });
@@ -85,6 +117,7 @@ function transaction(fn) {
       const txDb = { prepare: prepareOn(tx) };
       const resultado = await fn(txDb, ...args);
       await tx.commit();
+      await syncIfRemoto();
       return resultado;
     } catch (e) {
       await tx.rollback();
@@ -98,10 +131,20 @@ function transaction(fn) {
 const db = {
   prepare: prepareOn(client),
   transaction,
-  exec: (sql) => client.executeMultiple(sql)
+  exec: async (sql) => {
+    const r = await client.executeMultiple(sql);
+    await syncIfRemoto();
+    return r;
+  }
 };
 
 async function iniciar() {
+  // Antes de qualquer leitura/escrita, traz a réplica local em dia com o
+  // Turso — evita rodar schema/migração em cima de um replica.db vazio
+  // (primeira subida) ou desatualizado (deploy novo em cima de um disco
+  // antigo).
+  if (isRemoto) await client.sync();
+
   await db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   await importarBancoDoRepoSeVazio();
 

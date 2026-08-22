@@ -64,10 +64,13 @@ async function obterLoja() {
 }
 
 async function salvarContato(camposCrus) {
-  // Reaproveita a logo atual: esta tela nao mexe nela (troca de logo tem rota propria).
+  // Reaproveita a logo e as configuracoes de parcelamento atuais: esta tela
+  // so mexe no contato (gravar() sobrescreve o registro inteiro, entao sem
+  // isso salvar o contato apagaria o parcelamento configurado, e vice-versa).
   const atual = await obterContatoSalvo();
   const contato = montarContato({ ...camposCrus, logo: atual ? atual.logo : LOJA_PADRAO.logo });
-  return gravar(contato);
+  const parcelas = atual ? { parcelasSemJuros: atual.parcelasSemJuros, parcelasMax: atual.parcelasMax } : {};
+  return gravar({ ...contato, ...parcelas });
 }
 
 async function salvarLogo(logoUrl) {
@@ -75,4 +78,22 @@ async function salvarLogo(logoUrl) {
   return gravar({ ...atual, logo: logoUrl });
 }
 
-module.exports = { obterLoja, salvarContato, salvarLogo };
+// Trava os valores de parcelamento em faixas sensatas antes de gravar: nunca
+// permite "sem juros" maior que o total de parcelas aceitas, nunca deixa
+// alguem digitar 0 ou um numero absurdo de parcelas por engano.
+function clampParcelas({ parcelasSemJuros, parcelasMax } = {}) {
+  let max = parseInt(parcelasMax, 10);
+  if (!Number.isInteger(max) || max < 1) max = LOJA_PADRAO.parcelasMax;
+  max = Math.min(max, 24);
+  let semJuros = parseInt(parcelasSemJuros, 10);
+  if (!Number.isInteger(semJuros) || semJuros < 1) semJuros = LOJA_PADRAO.parcelasSemJuros;
+  semJuros = Math.min(semJuros, max);
+  return { parcelasSemJuros: semJuros, parcelasMax: max };
+}
+
+async function salvarParcelas(camposCrus) {
+  const atual = (await obterContatoSalvo()) || montarContato(LOJA_PADRAO);
+  return gravar({ ...atual, ...clampParcelas(camposCrus) });
+}
+
+module.exports = { obterLoja, salvarContato, salvarLogo, salvarParcelas };

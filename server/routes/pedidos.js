@@ -8,9 +8,18 @@ const { avaliarCupom, registrarUsoCupom } = require('./cupons');
 const { validarCPF, somenteDigitos } = require('../utils/cpf');
 const email = require('../utils/email');
 
+const { obterLoja } = require('../utils/siteConfig');
+
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UFS_VALIDAS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB',
   'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
+
+// Mensagens mostradas ao cliente ao final da compra (tela de confirmação e
+// e-mail — ver server/utils/email.js:enviarConfirmacaoPedido). Únicas e
+// enxutas de propósito: nada sobre estoque/backorder aqui (isso é tratado
+// internamente via encomendas, sem expor ao cliente nesta etapa).
+const MSG_LINK_EM_BREVE = 'Você receberá o link para pagamento em breve, pelo WhatsApp ou e-mail.';
+const MSG_COMBINAR = 'Entraremos em contato pelo WhatsApp para combinar a forma de pagamento.';
 
 // Endereço completo é exigido tanto do residencial quanto do de entrega (quando
 // diferente do residencial): é o que a nota fiscal e a entrega precisam.
@@ -62,17 +71,11 @@ async function itensComFaltaDeEstoque(itens) {
   return faltantes;
 }
 
-function mensagemEncomendas(itensFaltantes) {
-  if (!itensFaltantes.length) return null;
-  const partes = itensFaltantes.map(i => `"${i.produto_nome}" (${i.faltam} unidade${i.faltam > 1 ? 's' : ''})`);
-  return `Sem estoque suficiente para ${partes.join(', ')} agora — registramos um pedido de encomenda e vamos combinar o prazo pelo WhatsApp/telefone.`;
-}
-
 router.post('/checkout', async (req, res) => {
   const {
     nome_cliente, email_cliente, telefone_cliente, cpf_cliente,
     endereco_residencial, entrega_igual_residencial, endereco_entrega,
-    forma_pagamento, cupom
+    forma_pagamento, cupom, parcelas
   } = req.body || {};
 
   if (!nome_cliente || !telefone_cliente) {
@@ -83,6 +86,19 @@ router.post('/checkout', async (req, res) => {
   }
   if (!validarCPF(cpf_cliente)) {
     return res.status(400).json({ erro: 'Informe um CPF válido: é necessário para a emissão da nota fiscal.' });
+  }
+
+  // Parcelamento só existe no cartão de crédito; o limite sem-juros é o que o
+  // superadmin configurou em Site > Pagamento (server/utils/siteConfig.js).
+  let parcelasNumero = null;
+  let parcelasComJuros = 0;
+  if (forma_pagamento === 'cartao_credito') {
+    const loja = await obterLoja();
+    parcelasNumero = parseInt(parcelas, 10);
+    if (!Number.isInteger(parcelasNumero) || parcelasNumero < 1 || parcelasNumero > loja.parcelasMax) {
+      return res.status(400).json({ erro: `Informe em quantas parcelas (de 1 a ${loja.parcelasMax}).` });
+    }
+    parcelasComJuros = parcelasNumero > loja.parcelasSemJuros ? 1 : 0;
   }
 
   const erroResidencial = erroDoEndereco(endereco_residencial, 'residencial');
@@ -106,8 +122,9 @@ router.post('/checkout', async (req, res) => {
   const itensFaltantes = await itensComFaltaDeEstoque(itens);
 
   // O desconto e' sempre recalculado aqui, a partir dos itens de verdade: o
-  // valor que veio da tela nao e' confiavel.
-  const resultadoCupom = cupom ? await avaliarCupom(cupom, itens) : null;
+  // valor que veio da tela nao e' confiavel. O CPF entra na conferencia para
+  // cupons com limite "por cliente" (ver routes/cupons.js).
+  const resultadoCupom = cupom ? await avaliarCupom(cupom, itens, cpf_cliente) : null;
   const valorDesconto = resultadoCupom && resultadoCupom.valido ? resultadoCupom.desconto : 0;
   const cupomAplicado = resultadoCupom && resultadoCupom.valido ? resultadoCupom.codigo : null;
   const valorFinal = Math.round((total - valorDesconto) * 100) / 100;
@@ -127,12 +144,12 @@ router.post('/checkout', async (req, res) => {
        endereco_resid_bairro, endereco_resid_cidade, endereco_resid_uf, entrega_igual_residencial,
        endereco_entrega_cep, endereco_entrega_logradouro, endereco_entrega_numero, endereco_entrega_complemento,
        endereco_entrega_bairro, endereco_entrega_cidade, endereco_entrega_uf, endereco_entrega,
-       total, valor_desconto, cupom, valor_final, status, forma_pagamento, estoque_reservado)
+       total, valor_desconto, cupom, valor_final, status, forma_pagamento, parcelas, parcelas_com_juros, estoque_reservado)
       VALUES (@codigo, @usuario_id, @cliente_id, @nome_cliente, @email_cliente, @telefone_cliente, @cpf_cliente,
        @resid_cep, @resid_logradouro, @resid_numero, @resid_complemento, @resid_bairro, @resid_cidade, @resid_uf,
        @entrega_igual_residencial,
        @entrega_cep, @entrega_logradouro, @entrega_numero, @entrega_complemento, @entrega_bairro, @entrega_cidade, @entrega_uf,
-       @endereco_entrega_texto, @total, @valor_desconto, @cupom, @valor_final, 'aguardando_pagamento', @forma_pagamento, 1)`)
+       @endereco_entrega_texto, @total, @valor_desconto, @cupom, @valor_final, 'aguardando_pagamento', @forma_pagamento, @parcelas, @parcelas_com_juros, 1)`)
       .run({
         codigo, usuario_id: usuarioId, cliente_id: cliente ? cliente.id : null,
         nome_cliente, email_cliente: email_cliente.trim().toLowerCase(), telefone_cliente, cpf_cliente: cpfLimpo,
@@ -144,7 +161,8 @@ router.post('/checkout', async (req, res) => {
         entrega_complemento: entrega.complemento || null, entrega_bairro: entrega.bairro,
         entrega_cidade: entrega.cidade, entrega_uf: String(entrega.uf).toUpperCase(),
         endereco_entrega_texto: formatarEnderecoTexto(entrega),
-        total, valor_desconto: valorDesconto, cupom: cupomAplicado, valor_final: valorFinal, forma_pagamento: forma_pagamento || null
+        total, valor_desconto: valorDesconto, cupom: cupomAplicado, valor_final: valorFinal, forma_pagamento: forma_pagamento || null,
+        parcelas: parcelasNumero, parcelas_com_juros: parcelasComJuros
       });
     const novoPedidoId = info.lastInsertRowid;
 
@@ -172,7 +190,9 @@ router.post('/checkout', async (req, res) => {
       .run(item.produto_id, usuarioId, pedidoId, nome_cliente, email_cliente.trim().toLowerCase(), telefone_cliente,
         item.tamanho, item.cor, item.faltam);
   }
-  const avisoEstoque = mensagemEncomendas(itensFaltantes);
+  // Encomendas geradas por falta de estoque continuam registradas e visíveis
+  // pro lojista no painel — só não aparecem mais na tela/e-mail do cliente
+  // (ver MSG_LINK_EM_BREVE/MSG_COMBINAR acima).
 
   if (cupomAplicado) await registrarUsoCupom(cupomAplicado);
 
@@ -181,29 +201,41 @@ router.post('/checkout', async (req, res) => {
     .run(usuarioId, req.session.sid);
 
   const pedido = await db.prepare('SELECT * FROM pedidos WHERE id = ?').get(pedidoId);
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
 
   // Aviso ao superadmin de que chegou um pedido novo — nao bloqueia o
   // checkout se o envio falhar (SMTP fora do ar, por exemplo).
-  email.enviarAvisoNovoPedido(pedido, itens).catch(e => console.error('[email] aviso de novo pedido:', e.message));
+  email.enviarAvisoNovoPedido(pedido, itens, baseUrl).catch(e => console.error('[email] aviso de novo pedido:', e.message));
 
-  if (forma_pagamento !== 'combinar' && pagamento.configurado()) {
-    try {
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
-      const preferencia = await pagamento.criarPreferencia(pedido, itens, baseUrl);
-      await db.prepare('UPDATE pedidos SET mp_preference_id = ?, expira_em = ? WHERE id = ?')
-        .run(preferencia.id, preferencia.expiraEm, pedidoId);
-      return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: preferencia.init_point, aviso: avisoEstoque || undefined });
-    } catch (e) {
-      const detalhe = pagamento.detalheErroMp(e);
-      console.error('[mercadopago] erro ao criar preferência:', detalhe);
-      await db.prepare('UPDATE pedidos SET erro_pagamento = ? WHERE id = ?').run(detalhe, pedidoId);
-      const aviso = [avisoEstoque, 'Não foi possível iniciar o pagamento online agora. Entraremos em contato pelo WhatsApp para combinar o pagamento.'].filter(Boolean).join(' ');
-      return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso });
-    }
+  // "Combinar" e' o unico caso em que o cliente escolheu, de proposito, nao
+  // usar pagamento online — nunca tenta Mercado Pago aqui.
+  if (forma_pagamento === 'combinar') {
+    email.enviarConfirmacaoPedido(pedido, itens, { mensagem: MSG_COMBINAR }).catch(e => console.error('[email] confirmação de pedido:', e.message));
+    return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso: MSG_COMBINAR });
   }
 
-  const aviso = [avisoEstoque, 'Pagamento online ainda não configurado nesta loja. Combinaremos o pagamento por WhatsApp/telefone.'].filter(Boolean).join(' ');
-  res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso });
+  // Cartão de crédito: a geração automática de link (Checkout Pro) está fora
+  // do ar — em vez de travar a compra tentando algo que sabidamente falha,
+  // sempre segue no fluxo manual (pedido confirmado + link enviado depois
+  // pela loja via WhatsApp/e-mail). O parcelamento escolhido já foi validado
+  // e gravado acima.
+  if (forma_pagamento === 'cartao_credito' || !pagamento.configurado()) {
+    email.enviarConfirmacaoPedido(pedido, itens, { mensagem: MSG_LINK_EM_BREVE }).catch(e => console.error('[email] confirmação de pedido:', e.message));
+    return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso: MSG_LINK_EM_BREVE });
+  }
+
+  try {
+    const preferencia = await pagamento.criarPreferencia(pedido, itens, baseUrl);
+    await db.prepare('UPDATE pedidos SET mp_preference_id = ?, expira_em = ? WHERE id = ?')
+      .run(preferencia.id, preferencia.expiraEm, pedidoId);
+    return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: preferencia.init_point });
+  } catch (e) {
+    const detalhe = pagamento.detalheErroMp(e);
+    console.error('[mercadopago] erro ao criar preferência:', detalhe);
+    await db.prepare('UPDATE pedidos SET erro_pagamento = ? WHERE id = ?').run(detalhe, pedidoId);
+    email.enviarConfirmacaoPedido(pedido, itens, { mensagem: MSG_LINK_EM_BREVE }).catch(e2 => console.error('[email] confirmação de pedido:', e2.message));
+    return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso: MSG_LINK_EM_BREVE });
+  }
 });
 
 router.get('/meus-pedidos', async (req, res) => {

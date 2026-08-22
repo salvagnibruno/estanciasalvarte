@@ -154,7 +154,8 @@ CREATE TABLE IF NOT EXISTS cupons (
   valor REAL NOT NULL DEFAULT 0,
   validade_inicio TEXT, -- 'AAAA-MM-DD'; NULL = vale desde já
   validade TEXT, -- 'AAAA-MM-DD'; NULL = sem prazo final (mantido o nome original da coluna)
-  limite_usos INTEGER, -- NULL = sem limite de quantidade de pedidos
+  limite_usos INTEGER, -- NULL = sem limite. Em 'geral' e' o total de pedidos; em 'por_cliente' e' o maximo por CPF
+  limite_tipo TEXT NOT NULL DEFAULT 'geral', -- 'geral' | 'por_cliente' (limite_usos vira o maximo de usos POR CPF)
   usos_atuais INTEGER NOT NULL DEFAULT 0,
   ativo INTEGER NOT NULL DEFAULT 1,
   criado_em TEXT NOT NULL DEFAULT (datetime('now'))
@@ -206,6 +207,12 @@ CREATE TABLE IF NOT EXISTS pedidos (
   status TEXT NOT NULL DEFAULT 'aguardando_pagamento',
     -- aguardando_pagamento|pago|enviado|recebido|finalizado|cancelado|desistencia
   forma_pagamento TEXT, -- cartao_credito|cartao_debito|pix
+  -- Parcelamento (só se aplica a forma_pagamento = 'cartao_credito'). Guardamos
+  -- também se tinha juros NA HORA da compra (não recalcular depois: o limite
+  -- sem-juros configurado pelo superadmin pode mudar no futuro e o pedido
+  -- antigo não pode mudar de categoria retroativamente).
+  parcelas INTEGER,
+  parcelas_com_juros INTEGER NOT NULL DEFAULT 0,
   mp_preference_id TEXT,
   mp_payment_id TEXT,
   -- Texto de erro cru devolvido pela API do Mercado Pago quando a criação do

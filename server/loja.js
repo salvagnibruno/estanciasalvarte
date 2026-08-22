@@ -17,7 +17,14 @@ const LOJA = {
   instagramLabel: '@estanciasalvarte',
   email: null,          // preencher quando a loja definir o e-mail comercial
   endereco: null,       // preencher com o endereco da loja, se quiser no catalogo
-  site: 'estanciasalvarte.com.br'
+  site: 'estanciasalvarte.com.br',
+  // Parcelamento no cartão de crédito (ver server/utils/siteConfig.js e o
+  // menu Site > "Pagamento" no painel superadmin). parcelasSemJuros = até
+  // quantas parcelas o cliente NÃO paga juros; parcelasMax = até quantas
+  // parcelas o cartão aceita no total (as que passarem de parcelasSemJuros
+  // aparecem marcadas "Com juros" na tela do cliente).
+  parcelasSemJuros: 3,
+  parcelasMax: 12
 };
 
 module.exports = LOJA;

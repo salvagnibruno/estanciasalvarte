@@ -2,12 +2,14 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db/db');
 const { obterCarrinhoAtual, montarRespostaCarrinho } = require('./carrinho');
+const { somenteDigitos } = require('../utils/cpf');
 
 // Avalia um cupom contra os itens do carrinho (e nao contra um total solto
 // vindo da tela): so' assim da' para restringir o desconto a produtos
 // especificos, e o valor final nao depende do que o cliente mandar.
 // `itens` no formato de carrinho_itens: { produto_id, quantidade, preco_unitario, ... }
-async function avaliarCupom(codigoBruto, itens) {
+// `cpfBruto` so' e' necessario para cupons com limite_tipo = 'por_cliente'.
+async function avaliarCupom(codigoBruto, itens, cpfBruto) {
   const codigo = (codigoBruto || '').trim().toUpperCase();
   if (!codigo) return { valido: false, codigo: null, desconto: 0, motivo: 'Informe um cupom.' };
 
@@ -22,7 +24,24 @@ async function avaliarCupom(codigoBruto, itens) {
   if (cupom.validade && hoje > cupom.validade) {
     return { valido: false, codigo, desconto: 0, motivo: 'Cupom vencido.' };
   }
-  if (cupom.limite_usos !== null && cupom.usos_atuais >= cupom.limite_usos) {
+
+  if (cupom.limite_tipo === 'por_cliente') {
+    // Limite conta por CPF, nao pelo total de pedidos: um cupom com "2" aqui
+    // pode ser usado por 100 clientes diferentes, 2 vezes cada um.
+    const cpfLimpo = somenteDigitos(cpfBruto);
+    if (!cpfLimpo) {
+      return { valido: false, codigo, desconto: 0, motivo: 'Informe o CPF antes de aplicar este cupom.' };
+    }
+    if (cupom.limite_usos !== null) {
+      const usosDoCliente = (await db.prepare(`
+        SELECT COUNT(*) AS total FROM pedidos
+        WHERE UPPER(cupom) = ? AND cpf_cliente = ? AND status NOT IN ('cancelado', 'desistencia')
+      `).get(codigo, cpfLimpo)).total;
+      if (usosDoCliente >= cupom.limite_usos) {
+        return { valido: false, codigo, desconto: 0, motivo: 'Você já utilizou este cupom o número máximo de vezes permitido.' };
+      }
+    }
+  } else if (cupom.limite_usos !== null && cupom.usos_atuais >= cupom.limite_usos) {
     return { valido: false, codigo, desconto: 0, motivo: 'Este cupom já atingiu o limite de usos.' };
   }
 
@@ -57,11 +76,12 @@ async function registrarUsoCupom(codigo) {
   await db.prepare('UPDATE cupons SET usos_atuais = usos_atuais + 1 WHERE UPPER(codigo) = ?').run(String(codigo).toUpperCase());
 }
 
-// GET /api/cupons/validar?codigo=BEMVINDO10 — usa o carrinho de verdade da sessão/usuário.
+// GET /api/cupons/validar?codigo=BEMVINDO10&cpf=00000000000 — usa o carrinho de
+// verdade da sessão/usuário. `cpf` só é obrigatório para cupons "por cliente".
 router.get('/validar', async (req, res) => {
   const carrinho = await obterCarrinhoAtual(req);
   const { itens } = await montarRespostaCarrinho(carrinho);
-  res.json(await avaliarCupom(req.query.codigo, itens));
+  res.json(await avaliarCupom(req.query.codigo, itens, req.query.cpf));
 });
 
 module.exports = { router, avaliarCupom, registrarUsoCupom };

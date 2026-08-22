@@ -11,4 +11,9 @@ node_modules/
 server/db/estancia.db-shm
 server/db/estancia.db-wal
 
+# Réplica local do Turso (embedded replica) — recriada e sincronizada a cada
+# subida do servidor; nunca deve ser versionada.
+server/db/replica.db
+server/db/replica.db-*
+
 server/server.log

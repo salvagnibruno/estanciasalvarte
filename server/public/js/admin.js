@@ -19,7 +19,11 @@ let PF_MINIMIZAR_AO_REABRIR = false;
 async function iniciarPainel() {
   USUARIO = await Api.get('/api/auth/me');
   if (!USUARIO || !['admin', 'superadmin'].includes(USUARIO.papel)) {
-    window.location.href = '/login.html';
+    // Preserva a seção/URL que a pessoa queria abrir (ex.: link de e-mail
+    // "novo pedido" -> /superadmin/index.html#pedidos): login.html manda de
+    // volta pra' cá sozinho depois de autenticar (ver seu `next=`).
+    const destino = window.location.pathname + window.location.hash;
+    window.location.href = '/login.html?next=' + encodeURIComponent(destino);
     return;
   }
   CATEGORIAS_CACHE = await Api.get('/api/categorias');
@@ -37,7 +41,17 @@ async function iniciarPainel() {
     document.getElementById('titulo-secao').textContent = a.textContent.trim();
     SECOES[a.dataset.secao]();
   }));
-  const inicial = document.querySelector('[data-secao].ativo');
+
+  // Abre direto a seção do hash da URL (ex.: "#pedidos"), quando existe e é
+  // válida — senão, cai na seção marcada "ativo" no HTML, como sempre foi.
+  const secaoPeloHash = window.location.hash.replace('#', '');
+  const linkDoHash = secaoPeloHash && document.querySelector(`[data-secao="${secaoPeloHash}"]`);
+  const inicial = linkDoHash || document.querySelector('[data-secao].ativo');
+  document.querySelectorAll('[data-secao]').forEach(x => x.classList.remove('ativo'));
+  if (inicial) {
+    inicial.classList.add('ativo');
+    document.getElementById('titulo-secao').textContent = inicial.textContent.trim();
+  }
   SECOES[inicial ? inicial.dataset.secao : 'produtos']();
 }
 

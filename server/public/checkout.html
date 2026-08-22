@@ -1,8 +1,9 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" style="background:#f7f0e1">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
 <title>Finalizar compra — Estância Salvarte</title>
 <link rel="icon" href="/img/favicon.png">
 <link rel="stylesheet" href="/css/style.css">
@@ -74,6 +75,11 @@
       <option value="combinar">Combinar diretamente com a loja</option>
     </select>
 
+    <div id="bloco-parcelas" style="display:none;">
+      <label style="margin-top:.6rem;">Parcelas</label>
+      <select id="c-parcelas"></select>
+    </div>
+
     <button class="btn mt-2" id="btn-finalizar" style="width:100%;">Confirmar pedido</button>
     <p id="msg-checkout" class="msg" style="display:none;"></p>
   </div>
@@ -84,6 +90,10 @@
 <script>
 // Guarda o total do carrinho e o cupom validado para montar o resumo.
 const compra = { total: 0, itens: [], cupom: null, desconto: 0 };
+// Preenchido em preencherResumo() a partir de /api/loja (config do superadmin
+// em Site > Pagamento — ver server/utils/siteConfig.js).
+let PARCELAS_SEM_JUROS = 3;
+let PARCELAS_MAX = 12;
 
 const UFS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
 function preencherSelectsUf() {
@@ -119,6 +129,32 @@ document.getElementById('c-entrega-igual').addEventListener('change', (e) => {
   document.getElementById('bloco-endereco-entrega').style.display = e.target.checked ? 'none' : 'block';
 });
 
+// Monta as opções de parcela (1x = "à vista", sem juros até o limite
+// configurado pelo superadmin, com juros a partir dali) usando o valor final
+// já com desconto — refeito toda vez que a forma de pagamento ou o cupom mudam.
+function montarParcelas() {
+  const select = document.getElementById('c-parcelas');
+  const valorFinal = Math.max(0, Math.round((compra.total - compra.desconto) * 100) / 100);
+  const opcoes = [];
+  for (let n = 1; n <= PARCELAS_MAX; n++) {
+    const comJuros = n > PARCELAS_SEM_JUROS;
+    const valorParcela = valorFinal / n;
+    const rotulo = n === 1
+      ? `1x de ${formatarMoeda(valorParcela)} - À vista (Sem juros)`
+      : `${n}x de ${formatarMoeda(valorParcela)} (${comJuros ? 'Com juros' : 'Sem juros'})`;
+    opcoes.push(`<option value="${n}">${rotulo}</option>`);
+  }
+  select.innerHTML = opcoes.join('');
+}
+
+function atualizarBlocoParcelas() {
+  const ehCartaoCredito = document.getElementById('c-pagamento').value === 'cartao_credito';
+  document.getElementById('bloco-parcelas').style.display = ehCartaoCredito ? 'block' : 'none';
+  if (ehCartaoCredito) montarParcelas();
+}
+
+document.getElementById('c-pagamento').addEventListener('change', atualizarBlocoParcelas);
+
 function desenharResumo() {
   const linhas = compra.itens
     .map(i => `${i.quantidade}x ${escapeHtml(i.produto_nome)} — ${formatarMoeda(i.preco_unitario * i.quantidade)}`)
@@ -134,12 +170,17 @@ function desenharResumo() {
     ${linhas}${blocoDesconto}
     <hr><strong>Total: ${formatarMoeda(final)}</strong>
   `;
+  // O valor por parcela depende do total já com desconto — refaz as opções
+  // sempre que o resumo muda (ex.: cupom aplicado depois de já ter escolhido cartão).
+  if (document.getElementById('c-pagamento').value === 'cartao_credito') montarParcelas();
 }
 
 async function preencherResumo() {
   preencherSelectsUf();
 
-  const carrinho = await Api.get('/api/carrinho');
+  const [carrinho, loja] = await Promise.all([Api.get('/api/carrinho'), Api.get('/api/loja')]);
+  PARCELAS_SEM_JUROS = loja.parcelasSemJuros || PARCELAS_SEM_JUROS;
+  PARCELAS_MAX = loja.parcelasMax || PARCELAS_MAX;
   if (!carrinho.itens.length) {
     window.location.href = '/carrinho.html';
     return;
@@ -147,6 +188,7 @@ async function preencherResumo() {
   compra.itens = carrinho.itens;
   compra.total = carrinho.total;
   desenharResumo();
+  atualizarBlocoParcelas();
 
   const usuario = await Api.get('/api/auth/me');
   if (usuario) {
@@ -186,7 +228,8 @@ document.getElementById('btn-cupom').addEventListener('click', async () => {
   }
 
   try {
-    const resultado = await Api.get(`/api/cupons/validar?codigo=${encodeURIComponent(codigo)}`);
+    const cpf = document.getElementById('c-cpf').value;
+    const resultado = await Api.get(`/api/cupons/validar?codigo=${encodeURIComponent(codigo)}&cpf=${encodeURIComponent(cpf)}`);
     if (resultado.valido) {
       compra.cupom = resultado.codigo;
       compra.desconto = resultado.desconto;
@@ -206,6 +249,7 @@ document.getElementById('btn-cupom').addEventListener('click', async () => {
 document.getElementById('btn-finalizar').addEventListener('click', async () => {
   const msg = document.getElementById('msg-checkout');
   const entregaIgual = document.getElementById('c-entrega-igual').checked;
+  const formaPagamento = document.getElementById('c-pagamento').value;
   try {
     const resposta = await Api.post('/api/pedidos/checkout', {
       nome_cliente: document.getElementById('c-nome').value,
@@ -215,7 +259,8 @@ document.getElementById('btn-finalizar').addEventListener('click', async () => {
       endereco_residencial: lerEndereco('r'),
       entrega_igual_residencial: entregaIgual,
       endereco_entrega: entregaIgual ? null : lerEndereco('e'),
-      forma_pagamento: document.getElementById('c-pagamento').value,
+      forma_pagamento: formaPagamento,
+      parcelas: formaPagamento === 'cartao_credito' ? document.getElementById('c-parcelas').value : null,
       cupom: compra.cupom
     });
     if (resposta.checkout_url) {

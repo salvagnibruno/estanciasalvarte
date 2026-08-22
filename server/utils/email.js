@@ -80,9 +80,13 @@ function formatarMoeda(valor) {
 
 // Aviso à loja de que chegou um pedido novo — disparado logo depois que o
 // pedido e' gravado (routes/pedidos.js), qualquer que seja a forma de
-// pagamento escolhida.
-async function enviarAvisoNovoPedido(pedido, itens) {
+// pagamento escolhida. `baseUrl` (protocolo+host da requisicao) monta o link
+// direto pro painel: se o navegador da loja ja' estiver logado, cai direto na
+// aba Pedidos; senao, o login.html manda pra' la' sozinho depois de entrar
+// (ver public/js/admin.js e public/login.html, ambos com suporte a ?next=).
+async function enviarAvisoNovoPedido(pedido, itens, baseUrl) {
   const destinatarios = [EMAIL_AVISO_NOVO_PEDIDO];
+  const linkPainel = baseUrl ? `${baseUrl}/login.html?next=${encodeURIComponent('/superadmin/index.html#pedidos')}` : null;
 
   if (!configurado()) {
     console.log(`[email] SMTP não configurado — novo pedido ${pedido.codigo || pedido.id} (${pedido.nome_cliente}) não notificado por e-mail.`);
@@ -96,18 +100,57 @@ async function enviarAvisoNovoPedido(pedido, itens) {
       from: remetente,
       to: destinatarios.join(', '),
       subject: `Novo pedido ${pedido.codigo || pedido.id} — Estância Salvarte`,
-      text: `Chegou um pedido novo!\n\nCódigo: ${pedido.codigo || pedido.id}\nCliente: ${pedido.nome_cliente}\nTelefone: ${pedido.telefone_cliente || '-'}\nForma de pagamento: ${pedido.forma_pagamento || '-'}\nValor total: ${formatarMoeda(pedido.valor_final)}\n\nItens:\n${itensParaTexto(itens)}`,
-      html: `<p>Chegou um pedido novo!</p>
-             <p><strong>Código:</strong> ${escaparHtml(pedido.codigo || pedido.id)}<br>
-             <strong>Cliente:</strong> ${escaparHtml(pedido.nome_cliente)}<br>
+      text: `Chegou um pedido novo (código ${pedido.codigo || pedido.id}) no valor de ${formatarMoeda(pedido.valor_final)}.\n\nCliente: ${pedido.nome_cliente}\nTelefone: ${pedido.telefone_cliente || '-'}\nForma de pagamento: ${pedido.forma_pagamento || '-'}${pedido.parcelas ? ` (${pedido.parcelas}x${pedido.parcelas_com_juros ? ', com juros' : ', sem juros'})` : ''}\n\nItens:\n${itensParaTexto(itens)}\n${linkPainel ? `\nClique aqui para ver os detalhes: ${linkPainel}` : ''}`,
+      html: `<p>Chegou um pedido novo (código <strong>${escaparHtml(pedido.codigo || pedido.id)}</strong>) no valor de <strong>${formatarMoeda(pedido.valor_final)}</strong>.</p>
+             <p><strong>Cliente:</strong> ${escaparHtml(pedido.nome_cliente)}<br>
              <strong>Telefone:</strong> ${escaparHtml(pedido.telefone_cliente || '-')}<br>
-             <strong>Forma de pagamento:</strong> ${escaparHtml(pedido.forma_pagamento || '-')}<br>
-             <strong>Valor total:</strong> ${formatarMoeda(pedido.valor_final)}</p>
-             <p><strong>Itens:</strong></p>${itensParaHtml(itens)}`
+             <strong>Forma de pagamento:</strong> ${escaparHtml(pedido.forma_pagamento || '-')}${pedido.parcelas ? ` (${pedido.parcelas}x${pedido.parcelas_com_juros ? ', com juros' : ', sem juros'})` : ''}</p>
+             <p><strong>Itens:</strong></p>${itensParaHtml(itens)}
+             ${linkPainel ? `<p><a href="${linkPainel}">Clique aqui para ver os detalhes</a></p>` : ''}`
     });
     return { enviado: true };
   } catch (e) {
     console.error('[email] erro ao enviar aviso de novo pedido:', e.message);
+    return { enviado: false, motivo: 'falha_envio' };
+  }
+}
+
+// Confirmação ao cliente logo após finalizar a compra (pedido gravado, com
+// código) — disparada em routes/pedidos.js:checkout, independente de status
+// de pagamento. `mensagem` é o mesmo texto mostrado na tela de confirmação
+// (ver MSG_LINK_EM_BREVE/MSG_COMBINAR em routes/pedidos.js): enxuto de
+// propósito, sem falar de estoque — isso fica só no painel interno.
+async function enviarConfirmacaoPedido(pedido, itens, { mensagem } = {}) {
+  if (!pedido.email_cliente) return { enviado: false, motivo: 'sem_email_cliente' };
+  if (!configurado()) {
+    console.log(`[email] SMTP não configurado — confirmação do pedido ${pedido.codigo} não enviada para ${pedido.email_cliente}.`);
+    return { enviado: false, motivo: 'smtp_nao_configurado' };
+  }
+
+  const parcelasTexto = pedido.parcelas
+    ? `${pedido.parcelas}x de ${formatarMoeda(pedido.valor_final / pedido.parcelas)} (${pedido.parcelas_com_juros ? 'com juros' : 'sem juros'})`
+    : null;
+
+  const remetente = process.env.EMAIL_FROM || process.env.EMAIL_USER;
+  const transporte = getTransportador();
+  try {
+    await transporte.sendMail({
+      from: remetente,
+      to: pedido.email_cliente,
+      subject: `Pedido ${pedido.codigo} recebido — Estância Salvarte`,
+      text: `Olá, ${pedido.nome_cliente}!\n\nRecebemos seu pedido.\n\nPedido: ${pedido.codigo}\nValor total: ${formatarMoeda(pedido.valor_final)}${parcelasTexto ? `\nParcelamento: ${parcelasTexto}` : ''}\n\nItens:\n${itensParaTexto(itens)}\n\n${mensagem || ''}\n\nObrigado pela compra!`,
+      html: `<p>Olá, ${escaparHtml(pedido.nome_cliente)}!</p>
+             <p>Recebemos seu pedido. 🎉</p>
+             <p><strong>Pedido:</strong> ${escaparHtml(pedido.codigo)}<br>
+             <strong>Valor total:</strong> ${formatarMoeda(pedido.valor_final)}
+             ${parcelasTexto ? `<br><strong>Parcelamento:</strong> ${escaparHtml(parcelasTexto)}` : ''}</p>
+             <p><strong>Itens:</strong></p>${itensParaHtml(itens)}
+             ${mensagem ? `<p>${escaparHtml(mensagem)}</p>` : ''}
+             <p>Obrigado pela compra!</p>`
+    });
+    return { enviado: true };
+  } catch (e) {
+    console.error('[email] erro ao enviar confirmação de pedido:', e.message);
     return { enviado: false, motivo: 'falha_envio' };
   }
 }
@@ -174,5 +217,5 @@ async function enviarNotaFiscal(pedido, caminhoPdf) {
 
 module.exports = {
   configurado, enviarCodigoConfirmacao,
-  enviarAvisoNovoPedido, enviarConfirmacaoPagamento, enviarNotaFiscal
+  enviarAvisoNovoPedido, enviarConfirmacaoPedido, enviarConfirmacaoPagamento, enviarNotaFiscal
 };

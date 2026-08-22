@@ -181,7 +181,9 @@ function statusCupom(c) {
   if (!c.ativo) return '<span class="badge indisponivel">Inativo</span>';
   if (c.validade_inicio && hoje < c.validade_inicio) return '<span class="badge alerta">Agenda para o futuro</span>';
   if (c.validade && hoje > c.validade) return '<span class="badge indisponivel">Vencido</span>';
-  if (c.limite_usos !== null && c.usos_atuais >= c.limite_usos) return '<span class="badge indisponivel">Esgotado</span>';
+  // "Esgotado" só existe no limite geral — por cliente, o cupom continua
+  // valendo pra' CPFs que ainda não bateram no limite individual.
+  if (c.limite_tipo !== 'por_cliente' && c.limite_usos !== null && c.usos_atuais >= c.limite_usos) return '<span class="badge indisponivel">Esgotado</span>';
   return '<span class="badge ok">Ativo</span>';
 }
 
@@ -193,6 +195,9 @@ function validadeCupomTexto(c) {
 }
 
 function usosCupomTexto(c) {
+  if (c.limite_tipo === 'por_cliente') {
+    return c.limite_usos !== null ? `${c.usos_atuais} total (até ${c.limite_usos}/CPF)` : `${c.usos_atuais} (por CPF, sem limite)`;
+  }
   return c.limite_usos !== null ? `${c.usos_atuais} / ${c.limite_usos}` : `${c.usos_atuais} (sem limite)`;
 }
 
@@ -222,7 +227,7 @@ function checkboxesProdutosHtml(produtosSelecionadosIds) {
 }
 
 function formularioCupomHtml(cupom) {
-  const c = cupom || { codigo: '', tipo: 'percentual', valor: '', validade_inicio: '', validade: '', limite_usos: '', produtos: [] };
+  const c = cupom || { codigo: '', tipo: 'percentual', valor: '', validade_inicio: '', validade: '', limite_usos: '', limite_tipo: 'geral', produtos: [] };
   const produtosIds = (c.produtos || []).map(p => p.id);
   const todosProdutos = produtosIds.length === 0;
   return `
@@ -238,8 +243,21 @@ function formularioCupomHtml(cupom) {
     </div>
     <div class="linha-dupla">
       <div><label>Valor do desconto</label><input id="cp-valor" type="number" step="0.01" placeholder="10" value="${c.valor}"></div>
-      <div><label>Limite de usos (opcional)</label><input id="cp-limite" type="number" step="1" min="1" placeholder="Ex.: 5 = só nos 5 primeiros pedidos" value="${c.limite_usos ?? ''}"></div>
+      <div><label>Limite de uso</label>
+        <select id="cp-limite-tipo">
+          <option value="geral" ${c.limite_tipo !== 'por_cliente' ? 'selected' : ''}>Geral (total de pedidos)</option>
+          <option value="por_cliente" ${c.limite_tipo === 'por_cliente' ? 'selected' : ''}>Por cliente (CPF)</option>
+        </select>
+      </div>
     </div>
+    <div class="linha-dupla">
+      <div>
+        <label id="cp-limite-label">Quantidade (opcional)</label>
+        <input id="cp-limite" type="number" step="1" min="1" placeholder="Ex.: 5" value="${c.limite_usos ?? ''}">
+      </div>
+      <div></div>
+    </div>
+    <p id="cp-limite-ajuda" style="font-size:.78rem;color:var(--texto-suave);margin:-.4rem 0 .6rem;"></p>
     <div class="linha-dupla">
       <div><label>Válido a partir de (opcional)</label><input id="cp-inicio" type="date" value="${c.validade_inicio || ''}"></div>
       <div><label>Válido até (opcional)</label><input id="cp-fim" type="date" value="${c.validade || ''}"></div>
@@ -254,6 +272,17 @@ function formularioCupomHtml(cupom) {
     ${c.id ? '<button class="btn pequeno secundario" id="cp-cancelar-edicao" style="margin-left:.5rem;">Cancelar edição</button>' : ''}
     <p id="cp-msg" class="msg" style="display:none;"></p>
   `;
+}
+
+// Ajusta rótulo/placeholder/ajuda conforme "Geral" ou "Por cliente" — o mesmo
+// campo numérico (cp-limite) serve pros dois, só muda o que ele significa.
+function atualizarLegendaLimiteCupom() {
+  const porCliente = document.getElementById('cp-limite-tipo').value === 'por_cliente';
+  document.getElementById('cp-limite-label').textContent = porCliente ? 'Vezes por CPF' : 'Limite de usos (opcional)';
+  document.getElementById('cp-limite').placeholder = porCliente ? 'Ex.: 1 = uma vez por CPF' : 'Ex.: 5 = só nos 5 primeiros pedidos';
+  document.getElementById('cp-limite-ajuda').textContent = porCliente
+    ? 'Cada CPF poderá usar este cupom essa quantidade de vezes — sem limite para o total de pedidos.'
+    : 'Limita o total de pedidos que podem usar este cupom, somando todos os clientes. Deixe em branco para não limitar.';
 }
 
 async function secaoCupons(cupomEmEdicao) {
@@ -291,6 +320,9 @@ async function secaoCupons(cupomEmEdicao) {
     document.getElementById('cp-lista-produtos').style.display = e.target.checked ? 'none' : 'block';
   });
 
+  document.getElementById('cp-limite-tipo').addEventListener('change', atualizarLegendaLimiteCupom);
+  atualizarLegendaLimiteCupom();
+
   document.getElementById('cp-salvar').addEventListener('click', async () => {
     const msg = document.getElementById('cp-msg');
     const id = document.getElementById('cp-id').value;
@@ -302,6 +334,7 @@ async function secaoCupons(cupomEmEdicao) {
       validade_inicio: document.getElementById('cp-inicio').value,
       validade_fim: document.getElementById('cp-fim').value,
       limite_usos: document.getElementById('cp-limite').value,
+      limite_tipo: document.getElementById('cp-limite-tipo').value,
       produtos_ids: todosProdutos ? [] : [...document.querySelectorAll('[data-cp-produto]:checked')].map(c => parseInt(c.value, 10))
     };
     try {
@@ -392,6 +425,19 @@ async function secaoSite(avisoEmEdicao) {
     </div>
 
     <div class="card">
+      <h3>Pagamento — parcelamento no cartão de crédito</h3>
+      <p style="font-size:.85rem;color:var(--texto-suave);margin-top:0;">
+        Define as opções de parcela mostradas ao cliente no checkout (ex.: "2x sem juros, 3x com juros").
+      </p>
+      <div class="linha-dupla">
+        <div><label>Até quantas parcelas SEM juros</label><input id="st-parcelas-sem-juros" type="number" step="1" min="1" max="24" value="${loja.parcelasSemJuros}"></div>
+        <div><label>Total de parcelas aceitas</label><input id="st-parcelas-max" type="number" step="1" min="1" max="24" value="${loja.parcelasMax}"></div>
+      </div>
+      <button class="btn mt-1" id="st-parcelas-salvar">Salvar parcelamento</button>
+      <p id="st-parcelas-msg" class="msg" style="display:none;"></p>
+    </div>
+
+    <div class="card">
       <h3>${avisoEmEdicao ? 'Editar aviso' : 'Novo aviso'}</h3>
       ${formularioAvisoHtml(avisoEmEdicao)}
     </div>
@@ -440,6 +486,19 @@ async function secaoSite(avisoEmEdicao) {
       await Api.upload('/api/superadmin/site/logo', formData);
       msg.textContent = 'Logomarca atualizada!'; msg.className = 'msg sucesso';
       secaoSite();
+    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; }
+  });
+
+  // ---- Parcelamento ----
+  document.getElementById('st-parcelas-salvar').addEventListener('click', async () => {
+    const msg = document.getElementById('st-parcelas-msg');
+    msg.style.display = 'block';
+    try {
+      await Api.put('/api/superadmin/site/parcelas', {
+        parcelasSemJuros: document.getElementById('st-parcelas-sem-juros').value,
+        parcelasMax: document.getElementById('st-parcelas-max').value
+      });
+      msg.textContent = 'Parcelamento atualizado!'; msg.className = 'msg sucesso';
     } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; }
   });
 

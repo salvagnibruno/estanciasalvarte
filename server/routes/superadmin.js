@@ -5,7 +5,7 @@ const db = require('../db/db');
 const { exigirPapel, permissoesDe } = require('../middleware/auth');
 const { calcularPrecoVenda } = require('../db/pricing');
 const { PERMISSOES, normalizarPermissoes } = require('../permissoes');
-const { obterLoja, salvarContato, salvarLogo } = require('../utils/siteConfig');
+const { obterLoja, salvarContato, salvarLogo, salvarParcelas } = require('../utils/siteConfig');
 const { receberImagemSite, URL_BASE_SITE } = require('../middleware/upload');
 
 router.use(exigirPapel('superadmin'));
@@ -297,7 +297,7 @@ router.get('/cupons', async (req, res) => {
 
 // Valida os campos comuns ao criar/editar. Devolve {erro} OU os valores prontos para gravar.
 function validarCamposCupom(body) {
-  const { codigo, tipo, valor, validade_inicio, validade_fim, limite_usos, produtos_ids } = body || {};
+  const { codigo, tipo, valor, validade_inicio, validade_fim, limite_usos, limite_tipo, produtos_ids } = body || {};
   const codigoLimpo = (codigo || '').trim().toUpperCase();
   if (!codigoLimpo) return { erro: 'Informe o código do cupom.' };
   if (!['percentual', 'valor'].includes(tipo)) return { erro: 'Tipo deve ser percentual ou valor.' };
@@ -310,6 +310,8 @@ function validarCamposCupom(body) {
   const fim = String(validade_fim || '').trim() || null;
   if (inicio && fim && inicio > fim) return { erro: 'A data inicial de validade não pode ser depois da data final.' };
 
+  const limiteTipoLimpo = limite_tipo === 'por_cliente' ? 'por_cliente' : 'geral';
+
   let limiteUsosNumero = null;
   if (limite_usos !== undefined && limite_usos !== null && String(limite_usos).trim() !== '') {
     limiteUsosNumero = parseInt(limite_usos, 10);
@@ -317,11 +319,15 @@ function validarCamposCupom(body) {
       return { erro: 'O limite de usos deve ser um número inteiro maior que zero (ex.: 5 para valer só nos 5 primeiros pedidos).' };
     }
   }
+  // "Por cliente" só faz sentido com um número: sem ele não há o que limitar por CPF.
+  if (limiteTipoLimpo === 'por_cliente' && limiteUsosNumero === null) {
+    return { erro: 'Para limitar por cliente, informe quantas vezes cada CPF pode usar o cupom.' };
+  }
 
   const produtosIds = [...new Set((Array.isArray(produtos_ids) ? produtos_ids : [])
     .map(n => parseInt(n, 10)).filter(Number.isInteger))];
 
-  return { codigoLimpo, tipo, valorNumero, inicio, fim, limiteUsosNumero, produtosIds };
+  return { codigoLimpo, tipo, valorNumero, inicio, fim, limiteUsosNumero, limiteTipoLimpo, produtosIds };
 }
 
 router.post('/cupons', async (req, res) => {
@@ -332,8 +338,8 @@ router.post('/cupons', async (req, res) => {
   if (existente) return res.status(409).json({ erro: 'Já existe um cupom com este código.' });
 
   const criar = db.transaction(async (tx) => {
-    const info = await tx.prepare(`INSERT INTO cupons (codigo, tipo, valor, validade_inicio, validade, limite_usos, ativo)
-      VALUES (?, ?, ?, ?, ?, ?, 1)`).run(v.codigoLimpo, v.tipo, v.valorNumero, v.inicio, v.fim, v.limiteUsosNumero);
+    const info = await tx.prepare(`INSERT INTO cupons (codigo, tipo, valor, validade_inicio, validade, limite_usos, limite_tipo, ativo)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1)`).run(v.codigoLimpo, v.tipo, v.valorNumero, v.inicio, v.fim, v.limiteUsosNumero, v.limiteTipoLimpo);
     const ins = tx.prepare('INSERT INTO cupom_produtos (cupom_id, produto_id) VALUES (?, ?)');
     for (const pid of v.produtosIds) await ins.run(info.lastInsertRowid, pid);
     return info.lastInsertRowid;
@@ -353,8 +359,8 @@ router.put('/cupons/:id', async (req, res) => {
   if (conflito) return res.status(409).json({ erro: 'Já existe outro cupom com este código.' });
 
   const gravar = db.transaction(async (tx) => {
-    await tx.prepare(`UPDATE cupons SET codigo = ?, tipo = ?, valor = ?, validade_inicio = ?, validade = ?, limite_usos = ? WHERE id = ?`)
-      .run(v.codigoLimpo, v.tipo, v.valorNumero, v.inicio, v.fim, v.limiteUsosNumero, cupom.id);
+    await tx.prepare(`UPDATE cupons SET codigo = ?, tipo = ?, valor = ?, validade_inicio = ?, validade = ?, limite_usos = ?, limite_tipo = ? WHERE id = ?`)
+      .run(v.codigoLimpo, v.tipo, v.valorNumero, v.inicio, v.fim, v.limiteUsosNumero, v.limiteTipoLimpo, cupom.id);
     await tx.prepare('DELETE FROM cupom_produtos WHERE cupom_id = ?').run(cupom.id);
     const ins = tx.prepare('INSERT INTO cupom_produtos (cupom_id, produto_id) VALUES (?, ?)');
     for (const pid of v.produtosIds) await ins.run(cupom.id, pid);
@@ -387,6 +393,26 @@ router.post('/site/logo', receberImagemSite, async (req, res) => {
   if (!req.file) return res.status(400).json({ erro: 'Nenhuma imagem foi enviada.' });
   const logoUrl = `${URL_BASE_SITE}/${req.file.filename}`;
   res.status(201).json(await salvarLogo(logoUrl));
+});
+
+// Parcelamento no cartao de credito: ate quantas parcelas sem juros, e o
+// total maximo de parcelas aceitas (as excedentes ficam "com juros" na tela
+// do cliente). Ver server/routes/pedidos.js (valida no checkout) e
+// server/public/checkout.html (monta as opcoes de parcela pro cliente).
+router.put('/site/parcelas', async (req, res) => {
+  const { parcelasSemJuros, parcelasMax } = req.body || {};
+  const semJurosNumero = parseInt(parcelasSemJuros, 10);
+  const maxNumero = parseInt(parcelasMax, 10);
+  if (!Number.isInteger(semJurosNumero) || semJurosNumero < 1) {
+    return res.status(400).json({ erro: 'Informe até quantas parcelas ficam sem juros (mínimo 1).' });
+  }
+  if (!Number.isInteger(maxNumero) || maxNumero < 1 || maxNumero > 24) {
+    return res.status(400).json({ erro: 'Informe o total de parcelas aceitas (entre 1 e 24).' });
+  }
+  if (semJurosNumero > maxNumero) {
+    return res.status(400).json({ erro: 'O número de parcelas sem juros não pode ser maior que o total de parcelas aceitas.' });
+  }
+  res.json(await salvarParcelas({ parcelasSemJuros: semJurosNumero, parcelasMax: maxNumero }));
 });
 
 // ---------- Avisos (banners com período de exibição) ----------

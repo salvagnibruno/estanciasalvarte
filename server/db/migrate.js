@@ -230,6 +230,9 @@ async function migrar(db) {
   if (await adicionarColuna(db, 'pedidos', 'nfce_chave', 'TEXT')) mudancas.push('pedidos.nfce_chave');
   if (await adicionarColuna(db, 'pedidos', 'nfce_pdf_url', 'TEXT')) mudancas.push('pedidos.nfce_pdf_url');
   if (await adicionarColuna(db, 'pedidos', 'nfce_emitida_em', 'TEXT')) mudancas.push('pedidos.nfce_emitida_em');
+  if (await adicionarColuna(db, 'pedidos', 'parcelas', 'INTEGER')) mudancas.push('pedidos.parcelas');
+  if (await adicionarColuna(db, 'pedidos', 'parcelas_com_juros', 'INTEGER NOT NULL DEFAULT 0')) mudancas.push('pedidos.parcelas_com_juros');
+  if (await adicionarColuna(db, 'cupons', 'limite_tipo', "TEXT NOT NULL DEFAULT 'geral'")) mudancas.push('cupons.limite_tipo');
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_pedidos_expira ON pedidos(status, expira_em)`);
   await db.exec(`CREATE TABLE IF NOT EXISTS pedido_edicoes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
