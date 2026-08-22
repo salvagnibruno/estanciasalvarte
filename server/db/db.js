@@ -12,22 +12,16 @@ const { migrar } = require('./migrate');
 const TURSO_URL = process.env.TURSO_DATABASE_URL;
 const isRemoto = !!TURSO_URL;
 
-// RÉPLICA EMBARCADA: em produção, ler direto do Turso (client 100% remoto)
-// fazia CADA consulta (categorias, vitrine, carrinho, painel...) esperar uma
-// viagem de rede até o banco — isso é o que deixava o site inteiro lento,
-// principalmente em conexão móvel, já que uma única página faz várias
-// consultas em sequência. A "embedded replica" do libsql resolve isso: mantém
-// um arquivo SQLite local (replica.db), sincronizado em segundo plano com o
-// Turso. Leituras passam a ser locais (instantâneas); só a sincronização e as
-// escritas tocam a rede. Ver syncIfRemoto(), chamado após cada escrita.
-const REPLICA_PATH = path.join(__dirname, 'replica.db');
+// RÉPLICA EMBARCADA (desativada por ora): tentei usar a "embedded replica" do
+// libsql (arquivo local sincronizado com o Turso) pra tornar as leituras
+// instantâneas — mas isso quebrou o checkout em produção de um jeito que não
+// consigo depurar por completo sem acesso à conta Turso/aos logs do Render.
+// Como a prioridade agora é o cliente conseguir comprar, voltamos ao cliente
+// 100% remoto (mais lento, mas é o que estava funcionando). Ver histórico do
+// git para a versão com réplica embarcada, se quisermos retomar depois com
+// mais tempo de investigação.
 const client = isRemoto
-  ? createClient({
-      url: `file:${REPLICA_PATH}`,
-      syncUrl: TURSO_URL,
-      authToken: process.env.TURSO_AUTH_TOKEN,
-      syncInterval: 60 // sincroniza sozinho a cada 60s, além da sincronização após escritas
-    })
+  ? createClient({ url: TURSO_URL, authToken: process.env.TURSO_AUTH_TOKEN })
   // DB_PATH (ver fly.toml): aponta para o volume persistente (/data) em
   // hospedagens como Fly.io. Sem ela, cai no arquivo dentro do repositório —
   // correto só para desenvolvimento local. IMPORTANTE: antes desta correção,
@@ -37,29 +31,10 @@ const client = isRemoto
   // prática, apagava pedidos e alterações feitas em produção).
   : createClient({ url: `file:${process.env.DB_PATH || path.join(__dirname, 'estancia.db')}` });
 
-// Chamado depois de toda escrita (INSERT/UPDATE/DELETE) para que a réplica
-// local reflita a mudança imediatamente — sem isso, uma leitura logo após
-// escrever (ex.: "meu pedido foi criado, mostra ele na tela") poderia não
-// encontrar o dado ainda, porque a réplica só sincronizaria no próximo
-// intervalo de 60s.
-//
-// NUNCA deixa o erro subir: a escrita em si (client.execute/tx.commit) já
-// aconteceu e já está confirmada no Turso quando chegamos aqui — a réplica
-// local é só uma cópia de leitura rápida. Se a sincronização falhar por uma
-// instabilidade de rede pontual, o pior cenário é a réplica ficar por alguns
-// segundos desatualizada (ela se corrige sozinha no próximo syncInterval);
-// deixar essa falha derrubar a resposta inteira é muito pior — e, como as
-// rotas daqui são "async" sem try/catch (Express 4 não captura rejeição de
-// Promise em handler async sozinho), um erro aqui deixava a requisição do
-// cliente travada ou o processo inteiro reiniciando no meio de uma compra.
-async function syncIfRemoto() {
-  if (!isRemoto) return;
-  try {
-    await client.sync();
-  } catch (e) {
-    console.error('[db] falha ao sincronizar réplica local com o Turso (não afeta o dado já gravado):', e.message);
-  }
-}
+// Mantido como no-op (client.sync só existe/faz sentido em modo réplica
+// embarcada, desativado acima) — assim não precisamos mexer nos outros
+// pontos do arquivo que chamam isso depois de cada escrita.
+async function syncIfRemoto() {}
 
 // Em produção (banco fora do repositório) e ainda sem nenhuma tabela, importa
 // o estancia.db versionado no repo — assim o primeiro deploy já sobe com
@@ -96,7 +71,6 @@ async function importarBancoDoRepoSeVazio() {
     }
   }
   local.close();
-  await client.sync(); // reflete as linhas recem-importadas na replica local
   console.log(`[setup] Banco importado do repositório para o Turso (${dadosTabelas.length} tabela(s) copiadas).`);
 }
 
@@ -154,12 +128,6 @@ const db = {
 };
 
 async function iniciar() {
-  // Antes de qualquer leitura/escrita, traz a réplica local em dia com o
-  // Turso — evita rodar schema/migração em cima de um replica.db vazio
-  // (primeira subida) ou desatualizado (deploy novo em cima de um disco
-  // antigo).
-  if (isRemoto) await client.sync();
-
   await db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   await importarBancoDoRepoSeVazio();
 
