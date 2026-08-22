@@ -94,6 +94,10 @@ const compra = { total: 0, itens: [], cupom: null, desconto: 0 };
 // em Site > Pagamento — ver server/utils/siteConfig.js).
 let PARCELAS_SEM_JUROS = 3;
 let PARCELAS_MAX = 12;
+// Link "https://wa.me/55..." vindo de /api/loja (Contato, no painel) — usado
+// pra montar a mensagem pronta do WhatsApp depois do checkout, sem número
+// fixo aqui no front (se a loja trocar o WhatsApp, isso acompanha sozinho).
+let WHATSAPP_LOJA = null;
 
 const UFS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
 function preencherSelectsUf() {
@@ -183,6 +187,7 @@ async function preencherResumo() {
   const [carrinho, loja] = await Promise.all([Api.get('/api/carrinho'), Api.get('/api/loja')]);
   PARCELAS_SEM_JUROS = loja.parcelasSemJuros || PARCELAS_SEM_JUROS;
   PARCELAS_MAX = loja.parcelasMax || PARCELAS_MAX;
+  WHATSAPP_LOJA = loja.whatsapp || null;
   if (!carrinho.itens.length) {
     window.location.href = '/carrinho.html';
     return;
@@ -269,7 +274,18 @@ document.getElementById('btn-finalizar').addEventListener('click', async () => {
       if (resposta.aviso) alert(resposta.aviso);
       window.location.href = resposta.checkout_url;
     } else {
-      window.location.href = '/pedido-confirmado.html?pedido=' + resposta.pedido_id + (resposta.aviso ? '&aviso=' + encodeURIComponent(resposta.aviso) : '');
+      // Pedido caiu no fluxo manual (sem link automático de pagamento — ver
+      // routes/pedidos.js): abre o WhatsApp da loja numa aba nova, já com a
+      // mensagem pronta, e segue pra tela de confirmação na aba atual. Fica
+      // dentro do mesmo clique do cliente (sem await antes) justamente pra o
+      // navegador não bloquear a aba nova como pop-up indesejado.
+      if (WHATSAPP_LOJA && resposta.codigo) {
+        const mensagem = `Olá, Estância Salvarte!\nEnviei um pedido de compra de código ${resposta.codigo}.\n\nAguardo confirmação e link para pagamento.`;
+        window.open(`${WHATSAPP_LOJA}?text=${encodeURIComponent(mensagem)}`, '_blank');
+      }
+      const destino = new URLSearchParams({ pedido: resposta.pedido_id, codigo: resposta.codigo || '' });
+      if (resposta.aviso) destino.set('aviso', resposta.aviso);
+      window.location.href = '/pedido-confirmado.html?' + destino.toString();
     }
   } catch (e) {
     msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block';

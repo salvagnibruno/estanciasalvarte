@@ -33,7 +33,8 @@
   <div class="form-card text-center">
     <h2>🎉 Pedido recebido!</h2>
     <p id="detalhe-pedido">Carregando...</p>
-    <a href="/index.html" class="btn mt-1">Continuar comprando</a>
+    <a href="#" id="link-whatsapp" class="btn mt-1" style="display:none;background:#25D366;border-color:#25D366;">📲 Falar no WhatsApp</a>
+    <a href="/index.html" class="btn pequeno secundario mt-1" style="border-color:var(--couro);color:var(--couro);">Continuar comprando</a>
   </div>
 
   <!-- ---------- Pesquisa de satisfação ---------- -->
@@ -94,6 +95,26 @@
 const params = new URLSearchParams(window.location.search);
 const pedidoId = params.get('pedido');
 const aviso = params.get('aviso');
+const codigoPedido = params.get('codigo');
+
+// ---------- Link do WhatsApp com a mensagem pronta ----------
+// O checkout.html já tenta abrir isso automaticamente numa aba nova (dentro
+// do próprio clique de "Confirmar pedido", pra não ser barrado como pop-up);
+// este botão aqui é o caminho garantido caso o navegador bloqueie mesmo
+// assim, ou se o cliente chegou nesta tela sem passar pelo checkout.html
+// (ex.: atualizou a página).
+async function prepararLinkWhatsapp() {
+  if (!codigoPedido) return;
+  try {
+    const loja = await Api.get('/api/loja');
+    if (!loja.whatsapp) return;
+    const mensagem = `Olá, Estância Salvarte!\nEnviei um pedido de compra de código ${codigoPedido}.\n\nAguardo confirmação e link para pagamento.`;
+    const link = document.getElementById('link-whatsapp');
+    link.href = `${loja.whatsapp}?text=${encodeURIComponent(mensagem)}`;
+    link.target = '_blank';
+    link.style.display = 'inline-block';
+  } catch (e) { /* sem link do whatsapp configurado: só não mostra o botão */ }
+}
 
 const ROTULOS_STATUS = {
   aguardando_pagamento: 'aguardando pagamento',
@@ -189,6 +210,7 @@ document.getElementById('csat-enviar').addEventListener('click', async () => {
 
 carregarPedido();
 prepararCsat();
+prepararLinkWhatsapp();
 </script>
 </body>
 </html>
