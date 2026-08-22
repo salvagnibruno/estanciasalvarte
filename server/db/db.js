@@ -42,8 +42,23 @@ const client = isRemoto
 // escrever (ex.: "meu pedido foi criado, mostra ele na tela") poderia não
 // encontrar o dado ainda, porque a réplica só sincronizaria no próximo
 // intervalo de 60s.
+//
+// NUNCA deixa o erro subir: a escrita em si (client.execute/tx.commit) já
+// aconteceu e já está confirmada no Turso quando chegamos aqui — a réplica
+// local é só uma cópia de leitura rápida. Se a sincronização falhar por uma
+// instabilidade de rede pontual, o pior cenário é a réplica ficar por alguns
+// segundos desatualizada (ela se corrige sozinha no próximo syncInterval);
+// deixar essa falha derrubar a resposta inteira é muito pior — e, como as
+// rotas daqui são "async" sem try/catch (Express 4 não captura rejeição de
+// Promise em handler async sozinho), um erro aqui deixava a requisição do
+// cliente travada ou o processo inteiro reiniciando no meio de uma compra.
 async function syncIfRemoto() {
-  if (isRemoto) await client.sync();
+  if (!isRemoto) return;
+  try {
+    await client.sync();
+  } catch (e) {
+    console.error('[db] falha ao sincronizar réplica local com o Turso (não afeta o dado já gravado):', e.message);
+  }
 }
 
 // Em produção (banco fora do repositório) e ainda sem nenhuma tabela, importa

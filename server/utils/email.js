@@ -128,7 +128,7 @@ async function enviarConfirmacaoPedido(pedido, itens, { mensagem } = {}) {
   }
 
   const parcelasTexto = pedido.parcelas
-    ? `${pedido.parcelas}x de ${formatarMoeda(pedido.valor_final / pedido.parcelas)} (${pedido.parcelas_com_juros ? 'com juros' : 'sem juros'})`
+    ? `${pedido.parcelas}x de ${formatarMoeda(pedido.valor_final / pedido.parcelas)}${pedido.parcelas_com_juros ? ' (+ taxa de juros)' : pedido.parcelas > 1 ? ' (Sem juros)' : ' - À vista (Sem juros)'}`
     : null;
 
   const remetente = process.env.EMAIL_FROM || process.env.EMAIL_USER;

@@ -72,6 +72,20 @@ async function itensComFaltaDeEstoque(itens) {
 }
 
 router.post('/checkout', async (req, res) => {
+  try {
+    await processarCheckout(req, res);
+  } catch (e) {
+    // Rede de segurança: qualquer erro inesperado aqui dentro (ex.: instabilidade
+    // de rede com o banco) sempre vira uma resposta JSON de verdade pro cliente,
+    // em vez de travar a requisição ou derrubar o servidor (ver server.js).
+    console.error('[checkout] erro inesperado:', e);
+    if (!res.headersSent) {
+      res.status(500).json({ erro: 'Não foi possível finalizar seu pedido agora. Tente novamente em alguns instantes — se persistir, fale com a gente pelo WhatsApp.' });
+    }
+  }
+});
+
+async function processarCheckout(req, res) {
   const {
     nome_cliente, email_cliente, telefone_cliente, cpf_cliente,
     endereco_residencial, entrega_igual_residencial, endereco_entrega,
@@ -236,7 +250,7 @@ router.post('/checkout', async (req, res) => {
     email.enviarConfirmacaoPedido(pedido, itens, { mensagem: MSG_LINK_EM_BREVE }).catch(e2 => console.error('[email] confirmação de pedido:', e2.message));
     return res.status(201).json({ pedido_id: pedidoId, codigo, checkout_url: null, aviso: MSG_LINK_EM_BREVE });
   }
-});
+}
 
 router.get('/meus-pedidos', async (req, res) => {
   if (!req.session.usuario) return res.status(401).json({ erro: 'Login necessário.' });

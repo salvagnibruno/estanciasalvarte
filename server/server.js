@@ -7,6 +7,19 @@ const cookieSession = require('cookie-session');
 const db = require('./db/db');
 const { usuarioAtual } = require('./middleware/auth');
 
+// Rede de segurança: o Express 4 (usado aqui) NÃO encaminha sozinho um erro
+// vindo de dentro de uma rota "async" para o middleware de erro (app.use((err,
+// req, res, next)=>... lá embaixo) — isso só existe a partir do Express 5. Uma
+// Promise rejeitada sem tratamento vira um "unhandledRejection" do processo
+// Node, que por padrão (desde o Node 15) DERRUBA O SERVIDOR INTEIRO — ou seja,
+// um erro de rede pontual numa única requisição podia tirar a loja do ar pra
+// todo mundo. Isso aqui evita o pior caso: loga o erro (pra investigar) e
+// mantém o processo no ar. O ideal a longo prazo é colocar try/catch em cada
+// rota async (feito nas mais críticas, como o checkout — ver routes/pedidos.js).
+process.on('unhandledRejection', (motivo) => {
+  console.error('[server] Erro não tratado numa requisição (o servidor continua no ar):', motivo);
+});
+
 const app = express();
 app.set('trust proxy', 1);
 // Comprime HTML/CSS/JS/JSON antes de sair — sem isto nada tinha compressao

@@ -141,7 +141,9 @@ function montarParcelas() {
     const valorParcela = valorFinal / n;
     const rotulo = n === 1
       ? `1x de ${formatarMoeda(valorParcela)} - À vista (Sem juros)`
-      : `${n}x de ${formatarMoeda(valorParcela)} (${comJuros ? 'Com juros' : 'Sem juros'})`;
+      : comJuros
+        ? `${n}x de ${formatarMoeda(valorParcela)} (+ taxa de juros)`
+        : `${n}x de ${formatarMoeda(valorParcela)} (Sem juros)`;
     opcoes.push(`<option value="${n}">${rotulo}</option>`);
   }
   select.innerHTML = opcoes.join('');
