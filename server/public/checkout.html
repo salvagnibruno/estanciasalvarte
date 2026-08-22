@@ -14,13 +14,14 @@
   <h2 class="text-center">Finalizar compra</h2>
   <div class="form-card">
     <div id="resumo-itens" style="font-size:.88rem;color:var(--texto-suave);margin-bottom:1rem;"></div>
-    <label>Nome completo</label>
+    <p style="font-size:.78rem;color:var(--texto-suave);margin:0 0 .6rem;">Campos com <strong>*</strong> são obrigatórios.</p>
+    <label>Nome completo *</label>
     <input id="c-nome">
     <div class="linha-dupla">
-      <div><label>Telefone / WhatsApp</label><input id="c-telefone" placeholder="(55) 9xxxx-xxxx"></div>
-      <div><label>E-mail</label><input id="c-email" type="email"></div>
+      <div><label>Telefone / WhatsApp *</label><input id="c-telefone" placeholder="(55) 9xxxx-xxxx"></div>
+      <div><label>E-mail *</label><input id="c-email" type="email"></div>
     </div>
-    <label>CPF</label>
+    <label>CPF *</label>
     <input id="c-cpf" placeholder="000.000.000-00">
     <p style="font-size:.78rem;color:var(--texto-suave);margin:-.4rem 0 .6rem;">
       E-mail e CPF são necessários para a emissão da nota fiscal do pedido.
@@ -28,16 +29,16 @@
 
     <h3 style="margin:.8rem 0 .2rem;font-size:1rem;">Endereço residencial</h3>
     <div class="linha-dupla">
-      <div><label>CEP</label><input id="r-cep" placeholder="00000-000"></div>
-      <div><label>Número</label><input id="r-numero"></div>
+      <div><label>CEP *</label><input id="r-cep" placeholder="00000-000"></div>
+      <div><label>Número *</label><input id="r-numero"></div>
     </div>
-    <label>Logradouro (rua/avenida)</label><input id="r-logradouro">
+    <label>Logradouro (rua/avenida) *</label><input id="r-logradouro">
     <label>Complemento (opcional)</label><input id="r-complemento">
     <div class="linha-dupla">
-      <div><label>Bairro</label><input id="r-bairro"></div>
-      <div><label>Cidade</label><input id="r-cidade"></div>
+      <div><label>Bairro *</label><input id="r-bairro"></div>
+      <div><label>Cidade *</label><input id="r-cidade"></div>
     </div>
-    <label>Estado (UF)</label>
+    <label>Estado (UF) *</label>
     <select id="r-uf"></select>
 
     <label style="margin-top:.8rem;display:block;">
@@ -47,16 +48,16 @@
     <div id="bloco-endereco-entrega" style="display:none;">
       <h3 style="margin:.8rem 0 .2rem;font-size:1rem;">Endereço de entrega</h3>
       <div class="linha-dupla">
-        <div><label>CEP</label><input id="e-cep" placeholder="00000-000"></div>
-        <div><label>Número</label><input id="e-numero"></div>
+        <div><label>CEP *</label><input id="e-cep" placeholder="00000-000"></div>
+        <div><label>Número *</label><input id="e-numero"></div>
       </div>
-      <label>Logradouro (rua/avenida)</label><input id="e-logradouro">
+      <label>Logradouro (rua/avenida) *</label><input id="e-logradouro">
       <label>Complemento (opcional)</label><input id="e-complemento">
       <div class="linha-dupla">
-        <div><label>Bairro</label><input id="e-bairro"></div>
-        <div><label>Cidade</label><input id="e-cidade"></div>
+        <div><label>Bairro *</label><input id="e-bairro"></div>
+        <div><label>Cidade *</label><input id="e-cidade"></div>
       </div>
-      <label>Estado (UF)</label>
+      <label>Estado (UF) *</label>
       <select id="e-uf"></select>
     </div>
 
@@ -253,10 +254,91 @@ document.getElementById('btn-cupom').addEventListener('click', async () => {
   desenharResumo();
 });
 
+// Replica a validação de CPF do backend (server/utils/cpf.js) — assim o
+// cliente já vê "CPF inválido" aqui, sem precisar ir e voltar do servidor.
+function somenteDigitos(v) { return String(v || '').replace(/\D/g, ''); }
+function calcularDigitoCpf(base) {
+  let soma = 0;
+  for (let i = 0; i < base.length; i++) soma += parseInt(base[i], 10) * (base.length + 1 - i);
+  const resto = (soma * 10) % 11;
+  return resto === 10 ? 0 : resto;
+}
+function cpfValido(cpfBruto) {
+  const cpf = somenteDigitos(cpfBruto);
+  if (cpf.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(cpf)) return false;
+  if (calcularDigitoCpf(cpf.slice(0, 9)) !== parseInt(cpf[9], 10)) return false;
+  if (calcularDigitoCpf(cpf.slice(0, 10)) !== parseInt(cpf[10], 10)) return false;
+  return true;
+}
+
+// Marca/desmarca a borda vermelha de um campo problemático.
+function marcarCampo(id, invalido) {
+  const el = document.getElementById(id);
+  if (el) el.style.borderColor = invalido ? '#c0392b' : '';
+}
+
+// Confere TODOS os campos obrigatórios de uma vez (em vez de deixar o
+// servidor rejeitar um de cada vez) — assim o cliente vê a lista completa do
+// que falta preencher já na primeira tentativa, sem ficar corrigindo aos poucos.
+function validarFormulario(entregaIgual) {
+  const erros = [];
+  const camposParaLimpar = ['c-nome', 'c-telefone', 'c-email', 'c-cpf',
+    'r-cep', 'r-numero', 'r-logradouro', 'r-bairro', 'r-cidade', 'r-uf',
+    'e-cep', 'e-numero', 'e-logradouro', 'e-bairro', 'e-cidade', 'e-uf'];
+  camposParaLimpar.forEach(id => marcarCampo(id, false));
+
+  const obrigatorio = (id, rotulo) => {
+    const valor = document.getElementById(id).value.trim();
+    if (!valor) { erros.push(rotulo); marcarCampo(id, true); return false; }
+    return true;
+  };
+
+  obrigatorio('c-nome', 'Nome completo');
+  obrigatorio('c-telefone', 'Telefone/WhatsApp');
+
+  const email = document.getElementById('c-email').value.trim();
+  if (!email) { erros.push('E-mail'); marcarCampo('c-email', true); }
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { erros.push('E-mail (formato inválido)'); marcarCampo('c-email', true); }
+
+  const cpf = document.getElementById('c-cpf').value.trim();
+  if (!cpf) { erros.push('CPF'); marcarCampo('c-cpf', true); }
+  else if (!cpfValido(cpf)) { erros.push('CPF (número inválido)'); marcarCampo('c-cpf', true); }
+
+  obrigatorio('r-cep', 'CEP (endereço residencial)');
+  obrigatorio('r-numero', 'Número (endereço residencial)');
+  obrigatorio('r-logradouro', 'Logradouro (endereço residencial)');
+  obrigatorio('r-bairro', 'Bairro (endereço residencial)');
+  obrigatorio('r-cidade', 'Cidade (endereço residencial)');
+  obrigatorio('r-uf', 'Estado/UF (endereço residencial)');
+
+  if (!entregaIgual) {
+    obrigatorio('e-cep', 'CEP (endereço de entrega)');
+    obrigatorio('e-numero', 'Número (endereço de entrega)');
+    obrigatorio('e-logradouro', 'Logradouro (endereço de entrega)');
+    obrigatorio('e-bairro', 'Bairro (endereço de entrega)');
+    obrigatorio('e-cidade', 'Cidade (endereço de entrega)');
+    obrigatorio('e-uf', 'Estado/UF (endereço de entrega)');
+  }
+
+  return erros;
+}
+
 document.getElementById('btn-finalizar').addEventListener('click', async () => {
   const msg = document.getElementById('msg-checkout');
   const entregaIgual = document.getElementById('c-entrega-igual').checked;
   const formaPagamento = document.getElementById('c-pagamento').value;
+
+  const errosValidacao = validarFormulario(entregaIgual);
+  if (errosValidacao.length > 0) {
+    msg.style.display = 'block';
+    msg.className = 'msg erro';
+    msg.innerHTML = 'Antes de confirmar, corrija:<br>• ' + errosValidacao.join('<br>• ');
+    msg.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  msg.style.display = 'none';
+
   try {
     const resposta = await Api.post('/api/pedidos/checkout', {
       nome_cliente: document.getElementById('c-nome').value,
