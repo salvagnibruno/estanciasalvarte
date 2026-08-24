@@ -230,6 +230,43 @@ tr:hover td { background: #fbf7ec; }
    visual na tabela do admin para o vendedor bater o olho e retomar contato. */
 .linha-desistencia { background: #fbeceb; }
 
+/* ---------- Pedidos (painel admin/superadmin) — cartão em vez de tabela larga ----------
+   Antes disso era uma <table> com 14 colunas: em tela de notebook comum já não
+   cabia tudo e cortava informação (precisava rolar pros lados). Cada pedido
+   agora é um cartão com uma linha-resumo sempre visível (código, cliente,
+   valor, status, ações) e um painel de detalhes que só abre com "Ver mais",
+   com o resto organizado em duas colunas — funciona igual em qualquer largura
+   de tela, sem cursor horizontal. */
+.lista-pedidos { display: flex; flex-direction: column; gap: .7rem; }
+.cartao-pedido {
+  background: #fff; border-radius: var(--raio); box-shadow: var(--sombra);
+  border: 1px solid var(--creme-escuro); overflow: hidden;
+}
+.cartao-pedido.linha-desistencia { background: #fbeceb; }
+.cartao-pedido-resumo {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1.4rem; padding: .9rem 1.1rem;
+}
+.cartao-pedido-principal { display: flex; flex-direction: column; gap: .15rem; min-width: 160px; }
+.cartao-pedido-principal strong { font-size: 1rem; color: var(--couro-escuro); }
+.cartao-pedido-principal span { font-size: .82rem; color: var(--texto-suave); }
+.cartao-pedido-itens { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cartao-pedido-numeros { display: flex; flex-direction: column; gap: .15rem; min-width: 140px; }
+.cartao-pedido-numeros strong { font-size: 1.05rem; }
+.cartao-pedido-numeros span { font-size: .78rem; color: var(--texto-suave); }
+.cartao-pedido-status { width: auto; min-width: 170px; }
+.cartao-pedido-acoes { display: flex; align-items: center; gap: .5rem; margin-left: auto; flex-wrap: wrap; }
+.cartao-pedido-acoes .btn-expandir-linha {
+  background: none; border: none; color: var(--verde); font-weight: 700; font-size: .82rem; cursor: pointer; padding: .3rem .2rem;
+}
+.cartao-pedido-detalhe { border-top: 1px solid var(--creme-escuro); padding: 1rem 1.1rem; background: #fbf7ec; }
+.detalhe-pedido-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .6rem 1.6rem;
+}
+@media (max-width: 640px) { .detalhe-pedido-grid { grid-template-columns: 1fr; } }
+.detalhe-pedido-item { display: flex; justify-content: space-between; gap: .8rem; font-size: .86rem; border-bottom: 1px dashed var(--creme-escuro); padding: .3rem 0; }
+.detalhe-pedido-rotulo { color: var(--texto-suave); font-weight: 600; flex-shrink: 0; }
+.detalhe-pedido-valor { text-align: right; }
+
 /* ---------- Painel (admin/superadmin) ---------- */
 .painel-shell { display: flex; min-height: calc(100vh - 68px); }
 .painel-sidebar {

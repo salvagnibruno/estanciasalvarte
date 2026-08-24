@@ -135,6 +135,10 @@ async function secaoRelatorios() {
   const maxViews = Math.max(1, ...funil.map(f => f.visualizacoes));
 
   area.innerHTML = `
+    <div class="painel-topo">
+      <div></div>
+      <button class="btn pequeno secundario" id="btn-zerar-relatorios" style="border-color:#b04a3f;color:#b04a3f;">🗑️ Zerar dados de teste</button>
+    </div>
     <div class="kpi-grid">
       <div class="kpi-card"><div class="valor">${formatarMoeda(resumo.faturamento)}</div><div class="label">Faturamento (pedidos pagos+)</div></div>
       <div class="kpi-card"><div class="valor">${formatarMoeda(resumo.lucro_bruto)}</div><div class="label">Lucro bruto estimado</div></div>
@@ -168,6 +172,15 @@ async function secaoRelatorios() {
       </table></div>
     </div>
   `;
+
+  document.getElementById('btn-zerar-relatorios').addEventListener('click', async () => {
+    if (!confirm('Isso apaga TODAS as visualizações de produto, adições ao carrinho e carrinhos abandonados registrados até agora (dados de teste). NÃO mexe em pedidos nem produtos. Não pode ser desfeito. Confirma?')) return;
+    try {
+      await Api.post('/api/superadmin/relatorios/zerar', {});
+      alert('Dados de teste zerados.');
+      secaoRelatorios();
+    } catch (e) { alert(e.message); }
+  });
 }
 
 // ==================== CUPONS ====================

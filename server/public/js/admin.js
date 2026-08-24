@@ -1600,39 +1600,84 @@ async function secaoPedidos() {
   const area = document.getElementById('conteudo-secao');
   area.innerHTML = `
     <div id="form-pedido-wrap"></div>
-    <div class="tabela-wrap"><table>
-      <thead><tr><th>Código</th><th>Cliente</th><th>CPF</th><th>Telefone</th><th>Endereço residencial</th><th>Entrega</th><th>Total</th><th>Desconto</th><th>Cupom</th><th>Valor final</th><th>Pagamento</th><th>Status</th><th>Data</th><th>Ações</th></tr></thead>
-      <tbody id="tbody-pedidos"></tbody>
-    </table></div>
+    <div id="lista-pedidos" class="lista-pedidos"></div>
   `;
   await carregarTabelaPedidos();
 }
 
+// Trecho do endereço/CPF/telefone que muda de cor quando falta (info que a
+// loja precisa preencher/confirmar antes de despachar).
+function textoOuFaltando(valor) {
+  return valor ? escapeHtml(valor) : '<span style="color:#b04a3f;">Não informado</span>';
+}
+
+function linhaDetalhe(rotulo, valorHtml) {
+  return `<div class="detalhe-pedido-item"><span class="detalhe-pedido-rotulo">${rotulo}</span><span class="detalhe-pedido-valor">${valorHtml}</span></div>`;
+}
+
+function parcelasTextoPedido(p) {
+  if (!p.parcelas) return null;
+  return `${p.parcelas}x${p.parcelas > 1 ? (p.parcelas_com_juros ? ' (com juros)' : ' (sem juros)') : ' - à vista'}`;
+}
+
+// Cartão de pedido: uma linha-resumo sempre visível (o que o vendedor olha
+// primeiro — código, cliente, valor, status) + um painel de detalhes que só
+// abre ao clicar "Ver mais", com o resto organizado em duas colunas. Existia
+// uma tabela única com 14 colunas antes disso — em tela de notebook/desktop
+// normal ela cortava informação (precisava rolar pros lados pra ver tudo);
+// esse formato cabe em qualquer largura de tela sem cortar nada.
 async function carregarTabelaPedidos() {
   const pedidos = await Api.get('/api/gestao/pedidos');
-  document.getElementById('tbody-pedidos').innerHTML = pedidos.map(p => `
-    <tr class="${p.status === 'desistencia' ? 'linha-desistencia' : ''}">
-      <td data-label="Código"><strong>${escapeHtml(p.codigo || p.id)}</strong></td>
-      <td data-label="Cliente">${escapeHtml(p.nome_cliente)}<br><span style="font-size:.78rem;color:var(--texto-suave);">${escapeHtml(p.email_cliente || '-')}</span></td>
-      <td class="col-secundaria" data-label="CPF">${escapeHtml(formatarCpfExibicao(p.cpf_cliente))}</td>
-      <td class="col-secundaria" data-label="Telefone">${escapeHtml(p.telefone_cliente || '-')}</td>
-      <td class="col-secundaria" data-label="Endereço residencial" style="max-width:220px;">${escapeHtml(enderecoResidencialTexto(p))}</td>
-      <td class="col-secundaria" data-label="Entrega" style="max-width:220px;">${escapeHtml(enderecoEntregaTexto(p))}</td>
-      <td class="col-secundaria" data-label="Total">${formatarMoeda(p.total)}</td>
-      <td class="col-secundaria" data-label="Desconto">${p.valor_desconto > 0 ? '− ' + formatarMoeda(p.valor_desconto) : '-'}</td>
-      <td class="col-secundaria" data-label="Cupom">${escapeHtml(p.cupom || '-')}</td>
-      <td data-label="Valor final"><strong>${formatarMoeda(p.valor_final)}</strong></td>
-      <td class="col-secundaria" data-label="Pagamento">${escapeHtml(FORMA_PAGAMENTO_LABEL[p.forma_pagamento] || p.forma_pagamento || '-')}</td>
-      <td data-label="Status"><select data-pedido-status="${p.id}">${Object.entries(STATUS_PEDIDO).map(([valor, rotulo]) => `<option value="${valor}" ${valor === p.status ? 'selected' : ''}>${rotulo}</option>`).join('')}</select></td>
-      <td class="col-secundaria" data-label="Data">${escapeHtml(p.criado_em)}</td>
-      <td data-label="Ações">
-        <button class="btn pequeno" data-editar-pedido="${p.id}">Editar</button>
-        ${EH_SUPERADMIN() ? `<button class="btn pequeno perigo" data-excluir-pedido="${p.id}">Excluir</button>` : ''}
-      </td>
-      <td class="col-expandir" data-label=""><button type="button" class="btn-expandir-linha">▾ Ver mais</button></td>
-    </tr>
-  `).join('') || '<tr><td colspan="15">Nenhum pedido ainda.</td></tr>';
+  const lista = document.getElementById('lista-pedidos');
 
+  lista.innerHTML = pedidos.map(p => {
+    const itensResumo = p.itens.map(i => `${i.quantidade}x ${i.nome_produto}`).join(', ');
+    const parcelasTexto = parcelasTextoPedido(p);
+    return `
+    <article class="cartao-pedido ${p.status === 'desistencia' ? 'linha-desistencia' : ''}" data-cartao-pedido="${p.id}">
+      <div class="cartao-pedido-resumo">
+        <div class="cartao-pedido-principal">
+          <strong>${escapeHtml(p.codigo || p.id)}</strong>
+          <span>${escapeHtml(p.nome_cliente)}</span>
+          <span class="cartao-pedido-itens" title="${escapeHtml(itensResumo)}">${escapeHtml(itensResumo)}</span>
+        </div>
+        <div class="cartao-pedido-numeros">
+          <strong>${formatarMoeda(p.valor_final)}</strong>
+          <span>${escapeHtml(FORMA_PAGAMENTO_LABEL[p.forma_pagamento] || p.forma_pagamento || '-')}${parcelasTexto ? ' · ' + parcelasTexto : ''}</span>
+        </div>
+        <select data-pedido-status="${p.id}" class="cartao-pedido-status">
+          ${Object.entries(STATUS_PEDIDO).map(([valor, rotulo]) => `<option value="${valor}" ${valor === p.status ? 'selected' : ''}>${rotulo}</option>`).join('')}
+        </select>
+        <div class="cartao-pedido-acoes">
+          <button class="btn pequeno" data-editar-pedido="${p.id}">Editar</button>
+          ${EH_SUPERADMIN() ? `<button class="btn pequeno perigo" data-excluir-pedido="${p.id}">Excluir</button>` : ''}
+          <button type="button" class="btn-expandir-linha" data-toggle-detalhe="${p.id}">▾ Ver mais</button>
+        </div>
+      </div>
+      <div class="cartao-pedido-detalhe" id="detalhe-pedido-${p.id}" hidden>
+        <div class="detalhe-pedido-grid">
+          ${linhaDetalhe('CPF', p.cpf_cliente ? escapeHtml(formatarCpfExibicao(p.cpf_cliente)) : '<span style="color:#b04a3f;">Não informado</span>')}
+          ${linhaDetalhe('Telefone', textoOuFaltando(p.telefone_cliente))}
+          ${linhaDetalhe('E-mail', textoOuFaltando(p.email_cliente))}
+          ${linhaDetalhe('Data do pedido', escapeHtml(p.criado_em))}
+          ${linhaDetalhe('Endereço residencial', escapeHtml(enderecoResidencialTexto(p)))}
+          ${linhaDetalhe('Endereço de entrega', escapeHtml(enderecoEntregaTexto(p)))}
+          ${linhaDetalhe('Itens do pedido', escapeHtml(itensResumo))}
+          ${linhaDetalhe('Total', formatarMoeda(p.total))}
+          ${linhaDetalhe('Desconto', p.valor_desconto > 0 ? '− ' + formatarMoeda(p.valor_desconto) : '-')}
+          ${linhaDetalhe('Cupom', escapeHtml(p.cupom || '-'))}
+          ${parcelasTexto ? linhaDetalhe('Parcelamento', escapeHtml(parcelasTexto)) : ''}
+        </div>
+      </div>
+    </article>
+  `; }).join('') || '<p style="color:var(--texto-suave);">Nenhum pedido ainda.</p>';
+
+  document.querySelectorAll('[data-toggle-detalhe]').forEach(btn => btn.addEventListener('click', () => {
+    const painel = document.getElementById(`detalhe-pedido-${btn.dataset.toggleDetalhe}`);
+    const aberto = !painel.hidden;
+    painel.hidden = aberto;
+    btn.textContent = aberto ? '▾ Ver mais' : '▴ Ver menos';
+  }));
   document.querySelectorAll('[data-pedido-status]').forEach(sel => sel.addEventListener('change', async () => {
     try {
       await Api.put(`/api/gestao/pedidos/${sel.dataset.pedidoStatus}/status`, { status: sel.value });

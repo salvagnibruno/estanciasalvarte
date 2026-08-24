@@ -629,4 +629,20 @@ router.get('/relatorios/vendas-por-dia', async (req, res) => {
   res.json(rows);
 });
 
+// Zera só o que alimenta ESTA aba (visualizações de produto, carrinho
+// abandonado) — não mexe em pedidos nem produtos. Existe pra limpar dados de
+// teste antes de "abrir" a loja de verdade, sem arriscar apagar algo real por
+// engano numa consulta solta direto no banco.
+router.post('/relatorios/zerar', async (req, res) => {
+  const zerar = db.transaction(async (tx) => {
+    await tx.prepare('DELETE FROM eventos_analytics').run();
+    await tx.prepare('DELETE FROM carrinho_itens').run();
+    await tx.prepare('DELETE FROM carrinhos').run();
+    await tx.prepare(`INSERT INTO configuracoes (chave, valor) VALUES ('funil_reset_em', datetime('now'))
+                       ON CONFLICT(chave) DO UPDATE SET valor = datetime('now')`).run();
+  });
+  await zerar();
+  res.json({ ok: true });
+});
+
 module.exports = router;
