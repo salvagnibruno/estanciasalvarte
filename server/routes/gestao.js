@@ -416,6 +416,15 @@ router.put('/encomendas/:id/status', async (req, res) => {
   res.json({ ok: true });
 });
 
+router.delete('/encomendas/:id', async (req, res) => {
+  const encomenda = await db.prepare('SELECT id FROM encomendas WHERE id = ?').get(req.params.id);
+  if (!encomenda) return res.status(404).json({ erro: 'Encomenda/aviso não encontrado.' });
+  // Não mexe em estoque nem no pedido que originou (se houver) — é só o
+  // registro de acompanhamento em si que some.
+  await db.prepare('DELETE FROM encomendas WHERE id = ?').run(encomenda.id);
+  res.json({ ok: true });
+});
+
 // ---------- Pedidos ----------
 // Movido para routes/gestao_pedidos.js (edição de itens, cupom, dados do
 // cliente, cancelamento/troca, reconciliação e nota fiscal).

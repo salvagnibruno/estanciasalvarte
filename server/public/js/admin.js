@@ -2071,7 +2071,7 @@ async function secaoEncomendas() {
   const STATUS = ['aguardando', 'avisado', 'atendido', 'cancelado'];
   document.getElementById('conteudo-secao').innerHTML = `
     <div class="tabela-wrap"><table>
-      <thead><tr><th>Produto</th><th>Tipo</th><th>Cliente</th><th>Telefone</th><th>Tam./Cor</th><th>Pedido</th><th>Status</th><th>Data</th></tr></thead>
+      <thead><tr><th>Produto</th><th>Tipo</th><th>Cliente</th><th>Telefone</th><th>Tam./Cor</th><th>Pedido</th><th>Status</th><th>Data</th><th>Ações</th></tr></thead>
       <tbody>${encomendas.map(e => `
         <tr>
           <td data-label="Produto">${escapeHtml(e.produto_nome)}</td>
@@ -2081,12 +2081,20 @@ async function secaoEncomendas() {
           <td data-label="Pedido">${e.pedido_id ? `#${e.pedido_id}` : '-'}</td>
           <td data-label="Status"><select data-enc-status="${e.id}">${STATUS.map(s => `<option value="${s}" ${s === e.status ? 'selected' : ''}>${s}</option>`).join('')}</select></td>
           <td data-label="Data">${escapeHtml(e.criado_em)}</td>
+          <td data-label="Ações"><button class="btn pequeno perigo" data-excluir-encomenda="${e.id}">Excluir</button></td>
         </tr>
-      `).join('') || '<tr><td colspan="8">Nada por aqui.</td></tr>'}</tbody>
+      `).join('') || '<tr><td colspan="9">Nada por aqui.</td></tr>'}</tbody>
     </table></div>
   `;
   document.querySelectorAll('[data-enc-status]').forEach(sel => sel.addEventListener('change', async () => {
     await Api.put(`/api/gestao/encomendas/${sel.dataset.encStatus}/status`, { status: sel.value });
+  }));
+  document.querySelectorAll('[data-excluir-encomenda]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Excluir este registro de encomenda/aviso? Essa ação não pode ser desfeita.')) return;
+    try {
+      await Api.del(`/api/gestao/encomendas/${b.dataset.excluirEncomenda}`);
+      secaoEncomendas();
+    } catch (e) { alert(e.message); }
   }));
 }
 
