@@ -7,6 +7,7 @@ const { calcularPrecoVenda } = require('../db/pricing');
 const { PERMISSOES, normalizarPermissoes } = require('../permissoes');
 const { obterLoja, salvarContato, salvarLogo, salvarParcelas } = require('../utils/siteConfig');
 const { receberImagemSite, URL_BASE_SITE } = require('../middleware/upload');
+const { montarRespostaCarrinho } = require('./carrinho');
 
 router.use(exigirPapel('superadmin'));
 
@@ -465,69 +466,6 @@ router.delete('/avisos/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- Linhas (agrupamento transversal — cadastro exclusivo do superadmin) ----------
-// A atribuição de linhas a um produto (nenhuma, uma, várias ou todas) acontece
-// no cadastro/edição de produto em routes/gestao.js — aqui só a taxonomia em si.
-function gerarSlugLinha(texto) {
-  return String(texto || '')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .toLowerCase().trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-router.get('/linhas', async (req, res) => {
-  const linhas = await db.prepare(`
-    SELECT l.*, (SELECT COUNT(*) FROM produto_linhas pl WHERE pl.linha_id = l.id) AS total_produtos
-    FROM linhas l ORDER BY l.ordem ASC
-  `).all();
-  res.json(linhas);
-});
-
-router.post('/linhas', async (req, res) => {
-  const { nome, ordem } = req.body || {};
-  const nomeLimpo = String(nome || '').trim();
-  if (!nomeLimpo) return res.status(400).json({ erro: 'Informe o nome da linha.' });
-  const slug = gerarSlugLinha(nomeLimpo);
-  if (!slug) return res.status(400).json({ erro: 'O nome precisa ter ao menos uma letra ou número.' });
-
-  const existente = await db.prepare('SELECT id FROM linhas WHERE nome = ? COLLATE NOCASE OR slug = ?').get(nomeLimpo, slug);
-  if (existente) return res.status(409).json({ erro: 'Já existe uma linha com esse nome.' });
-
-  const ordemInformada = parseInt(ordem, 10);
-  const ordemFinal = Number.isInteger(ordemInformada)
-    ? ordemInformada
-    : (await db.prepare('SELECT COALESCE(MAX(ordem), 0) + 1 AS proxima FROM linhas').get()).proxima;
-
-  const info = await db.prepare('INSERT INTO linhas (nome, slug, ordem) VALUES (?, ?, ?)').run(nomeLimpo, slug, ordemFinal);
-  res.status(201).json({ id: info.lastInsertRowid, slug });
-});
-
-router.put('/linhas/:id', async (req, res) => {
-  const linha = await db.prepare('SELECT * FROM linhas WHERE id = ?').get(req.params.id);
-  if (!linha) return res.status(404).json({ erro: 'Linha não encontrada.' });
-
-  const { nome, ordem } = req.body || {};
-  const nomeLimpo = nome !== undefined ? String(nome).trim() : linha.nome;
-  if (!nomeLimpo) return res.status(400).json({ erro: 'Informe o nome da linha.' });
-  const slug = nome !== undefined ? gerarSlugLinha(nomeLimpo) : linha.slug;
-  if (!slug) return res.status(400).json({ erro: 'O nome precisa ter ao menos uma letra ou número.' });
-
-  const conflito = await db.prepare('SELECT id FROM linhas WHERE (nome = ? COLLATE NOCASE OR slug = ?) AND id != ?').get(nomeLimpo, slug, linha.id);
-  if (conflito) return res.status(409).json({ erro: 'Já existe outra linha com esse nome.' });
-
-  const ordemInformada = parseInt(ordem, 10);
-  await db.prepare('UPDATE linhas SET nome = ?, slug = ?, ordem = ? WHERE id = ?')
-    .run(nomeLimpo, slug, Number.isInteger(ordemInformada) ? ordemInformada : linha.ordem, linha.id);
-  res.json({ ok: true, slug });
-});
-
-router.delete('/linhas/:id', async (req, res) => {
-  const info = await db.prepare('DELETE FROM linhas WHERE id = ?').run(req.params.id);
-  if (!info.changes) return res.status(404).json({ erro: 'Linha não encontrada.' });
-  res.json({ ok: true });
-});
-
 // ---------- Relatorios ----------
 router.get('/relatorios/resumo', async (req, res) => {
   const totalProdutos = (await db.prepare('SELECT COUNT(*) n FROM produtos WHERE ativo = 1').get()).n;
@@ -567,6 +505,43 @@ router.get('/relatorios/carrinho-abandonado', async (req, res) => {
     LIMIT 15
   `).all();
   res.json(rows);
+});
+
+// Carrinhos válidos (status 'aberto') de clientes LOGADOS, com o que dá para
+// saber sobre cada um — clica no card "Carrinhos em aberto" do resumo. Carrinho
+// de visitante (sem login) não entra: não haveria como contatar quem é. CPF é
+// "o que tiver": a conta de login não pede CPF no cadastro, então só aparece se
+// o mesmo e-mail/telefone já tiver aparecido num pedido anterior (tabela
+// clientes) — pode vir vazio para quem nunca comprou.
+router.get('/relatorios/carrinhos-abertos', async (req, res) => {
+  const carrinhos = await db.prepare(`
+    SELECT c.id, c.criado_em, c.atualizado_em,
+           u.nome AS usuario_nome, u.email AS usuario_email, u.telefone AS usuario_telefone,
+           (SELECT cl.cpf FROM clientes cl
+              WHERE (u.email IS NOT NULL AND cl.email = u.email)
+                 OR (u.telefone IS NOT NULL AND cl.telefone = u.telefone)
+              LIMIT 1) AS cpf
+    FROM carrinhos c
+    JOIN usuarios u ON u.id = c.usuario_id
+    WHERE c.status = 'aberto'
+    ORDER BY c.atualizado_em DESC
+  `).all();
+
+  const detalhados = await Promise.all(carrinhos.map(async (c) => {
+    const { itens, total } = await montarRespostaCarrinho(c);
+    return {
+      carrinho_id: c.id,
+      usuario_nome: c.usuario_nome,
+      usuario_email: c.usuario_email,
+      usuario_telefone: c.usuario_telefone,
+      cpf: c.cpf || null,
+      itens,
+      total,
+      criado_em: c.criado_em,
+      atualizado_em: c.atualizado_em
+    };
+  }));
+  res.json(detalhados);
 });
 
 // Produtos mais vendidos (por unidades, em pedidos pagos/concluidos)

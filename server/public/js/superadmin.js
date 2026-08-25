@@ -2,7 +2,6 @@ SECOES.usuarios = secaoUsuarios;
 SECOES.relatorios = secaoRelatorios;
 SECOES.cupons = secaoCupons;
 SECOES.site = secaoSite;
-SECOES.linhas = secaoLinhas;
 
 // Permissoes que podem ser concedidas — vem de server/permissoes.js.
 let PERMISSOES_DISPONIVEIS = [];
@@ -144,10 +143,14 @@ async function secaoRelatorios() {
       <div class="kpi-card"><div class="valor">${formatarMoeda(resumo.lucro_bruto)}</div><div class="label">Lucro bruto estimado</div></div>
       <div class="kpi-card"><div class="valor">${resumo.total_pedidos}</div><div class="label">Pedidos totais</div></div>
       <div class="kpi-card"><div class="valor">${resumo.total_produtos}</div><div class="label">Produtos ativos</div></div>
-      <div class="kpi-card"><div class="valor">${resumo.carrinhos_abertos}</div><div class="label">Carrinhos em aberto</div></div>
+      <button type="button" class="kpi-card" id="kpi-carrinhos-abertos" style="text-align:left;cursor:pointer;border:none;font:inherit;" title="Ver os carrinhos abertos de clientes logados">
+        <div class="valor">${resumo.carrinhos_abertos}</div><div class="label">Carrinhos em aberto ▾</div>
+      </button>
       <div class="kpi-card"><div class="valor">${resumo.agendamentos_pendentes}</div><div class="label">Agendamentos pendentes</div></div>
       <div class="kpi-card"><div class="valor">${resumo.encomendas_abertas}</div><div class="label">Encomendas/avisos em aberto</div></div>
     </div>
+
+    <div id="detalhe-carrinhos-abertos"></div>
 
     <div class="card">
       <h3>🛒 Produtos mais colocados no carrinho e não finalizados</h3>
@@ -181,6 +184,54 @@ async function secaoRelatorios() {
       secaoRelatorios();
     } catch (e) { alert(e.message); }
   });
+
+  document.getElementById('kpi-carrinhos-abertos').addEventListener('click', () => alternarDetalheCarrinhosAbertos());
+}
+
+// Só carrinhos de clientes LOGADOS (visitante não tem contato pra' abordar).
+// Um clique no card alterna: fecha se já estiver aberto, senão busca e mostra.
+let CARRINHOS_ABERTOS_VISIVEL = false;
+async function alternarDetalheCarrinhosAbertos() {
+  const area = document.getElementById('detalhe-carrinhos-abertos');
+  if (CARRINHOS_ABERTOS_VISIVEL) {
+    area.innerHTML = '';
+    CARRINHOS_ABERTOS_VISIVEL = false;
+    return;
+  }
+  area.innerHTML = '<div class="card"><p class="vazio">Carregando carrinhos...</p></div>';
+  try {
+    const carrinhos = await Api.get('/api/superadmin/relatorios/carrinhos-abertos');
+    area.innerHTML = `
+      <div class="card">
+        <h3>🛒 Carrinhos em aberto — clientes logados</h3>
+        ${carrinhos.length ? carrinhos.map(c => `
+          <div class="card" style="margin-bottom:.6rem;box-shadow:none;border-style:dashed;">
+            <div class="flex entre" style="align-items:flex-start;">
+              <div>
+                <strong>${escapeHtml(c.usuario_nome)}</strong><br>
+                <small style="color:var(--texto-suave);">
+                  ${c.cpf ? `CPF: ${escapeHtml(formatarCpfExibicao(c.cpf))} · ` : ''}
+                  ${c.usuario_email ? escapeHtml(c.usuario_email) : 'Sem e-mail'}
+                  ${c.usuario_telefone ? ` · ${escapeHtml(c.usuario_telefone)}` : ''}
+                </small>
+              </div>
+              <strong>${formatarMoeda(c.total)}</strong>
+            </div>
+            <table style="width:100%;margin-top:.5rem;font-size:.85rem;">
+              ${c.itens.map(i => `<tr>
+                <td>${escapeHtml(i.produto_nome)}${i.tamanho ? ` (${escapeHtml(i.tamanho)})` : ''}${i.cor ? ` — ${escapeHtml(i.cor)}` : ''}</td>
+                <td style="text-align:right;">${i.quantidade}x ${formatarMoeda(i.preco_unitario)}</td>
+              </tr>`).join('')}
+            </table>
+            <small style="color:var(--texto-suave);">Desde ${escapeHtml(c.criado_em)} · última atividade ${escapeHtml(c.atualizado_em)}</small>
+          </div>
+        `).join('') : '<p class="vazio">Nenhum carrinho aberto de cliente logado agora.</p>'}
+      </div>
+    `;
+    CARRINHOS_ABERTOS_VISIVEL = true;
+  } catch (e) {
+    area.innerHTML = `<div class="card"><p class="vazio">${escapeHtml(e.message)}</p></div>`;
+  }
 }
 
 // ==================== CUPONS ====================
@@ -549,79 +600,6 @@ async function secaoSite(avisoEmEdicao) {
     if (!confirm('Excluir este aviso? Não é possível desfazer.')) return;
     await Api.del(`/api/superadmin/avisos/${b.dataset.avisoExcluir}`);
     secaoSite();
-  }));
-}
-
-// ==================== LINHAS ====================
-// Taxonomia transversal de produtos (Infantil, Linha Verão, Calçados etc.) —
-// cadastro exclusivo do superadmin. A atribuição a cada produto acontece no
-// formulário de produto (admin.js), que lista as linhas cadastradas aqui.
-function formularioLinhaHtml(linha) {
-  const l = linha || { nome: '', ordem: '' };
-  return `
-    <input type="hidden" id="ln-id" value="${l.id || ''}">
-    <div class="linha-dupla">
-      <div><label>Nome</label><input id="ln-nome" placeholder="Linha Inverno" value="${escapeHtml(l.nome)}"></div>
-      <div><label>Ordem de exibição</label><input id="ln-ordem" type="number" step="1" value="${l.ordem}"></div>
-    </div>
-    <button class="btn mt-1" id="ln-salvar">${l.id ? 'Salvar alterações' : 'Criar linha'}</button>
-    ${l.id ? '<button class="btn pequeno secundario" id="ln-cancelar-edicao" style="margin-left:.5rem;">Cancelar edição</button>' : ''}
-    <p id="ln-msg" class="msg" style="display:none;"></p>
-  `;
-}
-
-async function secaoLinhas(linhaEmEdicao) {
-  const linhas = await Api.get('/api/superadmin/linhas');
-
-  document.getElementById('conteudo-secao').innerHTML = `
-    <div class="card">
-      <h3>${linhaEmEdicao ? 'Editar linha' : 'Nova linha'}</h3>
-      ${formularioLinhaHtml(linhaEmEdicao)}
-    </div>
-    <div class="tabela-wrap"><table>
-      <thead><tr><th>Ordem</th><th>Nome</th><th>Produtos</th><th>Ações</th></tr></thead>
-      <tbody>${linhas.map(l => `
-        <tr>
-          <td data-label="Ordem">${l.ordem}</td>
-          <td data-label="Nome"><strong>${escapeHtml(l.nome)}</strong></td>
-          <td data-label="Produtos">${l.total_produtos ?? '-'}</td>
-          <td data-label="Ações">
-            <button class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" data-linha-editar="${l.id}">Editar</button>
-            <button class="btn pequeno secundario" style="border-color:var(--vermelho);color:var(--vermelho);" data-linha-excluir="${l.id}">Excluir</button>
-          </td>
-        </tr>
-      `).join('') || '<tr><td colspan="4">Nenhuma linha cadastrada.</td></tr>'}</tbody>
-    </table></div>
-  `;
-
-  document.getElementById('ln-salvar').addEventListener('click', async () => {
-    const msg = document.getElementById('ln-msg');
-    const id = document.getElementById('ln-id').value;
-    const corpo = {
-      nome: document.getElementById('ln-nome').value,
-      ordem: document.getElementById('ln-ordem').value
-    };
-    try {
-      if (id) await Api.put(`/api/superadmin/linhas/${id}`, corpo);
-      else await Api.post('/api/superadmin/linhas', corpo);
-      secaoLinhas();
-    } catch (e) { msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block'; }
-  });
-
-  const btnCancelar = document.getElementById('ln-cancelar-edicao');
-  if (btnCancelar) btnCancelar.addEventListener('click', () => secaoLinhas());
-
-  document.querySelectorAll('[data-linha-editar]').forEach(b => b.addEventListener('click', () => {
-    const linha = linhas.find(l => l.id === parseInt(b.dataset.linhaEditar, 10));
-    secaoLinhas(linha);
-  }));
-
-  document.querySelectorAll('[data-linha-excluir]').forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('Excluir esta linha? Ela sai de todos os produtos que a usam.')) return;
-    try {
-      await Api.del(`/api/superadmin/linhas/${b.dataset.linhaExcluir}`);
-      secaoLinhas();
-    } catch (e) { alert(e.message); }
   }));
 }
 

@@ -87,17 +87,86 @@ async function resetarCatalogoAntigo(db) {
     await tx.prepare('UPDATE pedido_itens SET produto_id = NULL WHERE produto_id IS NOT NULL').run();
     await tx.prepare('DELETE FROM eventos_analytics WHERE produto_id IS NOT NULL').run();
     for (const tabela of ['produto_tamanhos', 'produto_cores', 'produto_estoque', 'cupom_produtos',
-      'produto_linhas', 'interesses', 'encomendas', 'carrinho_itens', 'historico_precos']) {
+      'produto_categorias', 'interesses', 'encomendas', 'carrinho_itens', 'historico_precos']) {
       await tx.prepare(`DELETE FROM ${tabela}`).run();
     }
     await tx.prepare('DELETE FROM produtos').run();
-    await tx.prepare('DELETE FROM linhas').run();
     await tx.prepare('DELETE FROM categorias').run();
     await tx.prepare(`INSERT INTO configuracoes (chave, valor) VALUES ('catalogo_versao', ?)
       ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor`).run(String(CATALOGO_VERSAO_ATUAL));
   });
   await limpar();
   return true;
+}
+
+// ---------- categorias / linhas: unificação num só cadastro ----------
+// "Linhas" e "categorias" eram dois cadastros paralelos para a mesma ideia
+// (agrupar produtos). A partir daqui só existe "categorias", e um produto
+// pode participar de quantas quiser (produto_categorias, N:N) — não só da
+// categoria "principal" (produtos.categoria_id, que continua existindo por
+// motivo técnico: é NOT NULL, então todo produto sempre tem uma; ver
+// routes/gestao.js). Roda uma única vez (marca em configuracoes); depois
+// disso as tabelas antigas de linha somem.
+async function unificarCategoriasLinhas(db) {
+  if (await jaFeito(db, 'categorias_linhas_unificadas')) return null;
+
+  const rodar = db.transaction(async (tx) => {
+    // A categoria "principal" de cada produto passa a contar como uma
+    // participação normal — sem isso, filtrar/contar produtos via a tabela
+    // nova deixaria de achar quem só tinha a principal (a imensa maioria).
+    await tx.prepare(`
+      INSERT OR IGNORE INTO produto_categorias (produto_id, categoria_id)
+      SELECT id, categoria_id FROM produtos
+    `).run();
+
+    const linhasExiste = !!(await tx.prepare(
+      `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'linhas'`
+    ).get());
+    if (!linhasExiste) return { linhas_migradas: 0, categorias_criadas: 0 };
+
+    const linhas = await tx.prepare('SELECT * FROM linhas ORDER BY ordem ASC').all();
+    let ordemNova = (await tx.prepare('SELECT COALESCE(MAX(ordem), 0) AS maxima FROM categorias').get()).maxima;
+    let categoriasCriadas = 0;
+    const categoriaIdDaLinha = {};
+
+    for (const linha of linhas) {
+      // Já existe uma categoria com o mesmo nome/endereço (ex.: a linha
+      // "Bombachas Masculinas" duplicava a categoria de mesmo nome)? Reusa —
+      // não faz sentido ter duas categorias iguais depois da unificação.
+      const existente = await tx.prepare(
+        'SELECT id FROM categorias WHERE nome = ? COLLATE NOCASE OR slug = ?'
+      ).get(linha.nome, linha.slug);
+      if (existente) {
+        categoriaIdDaLinha[linha.id] = existente.id;
+        continue;
+      }
+      ordemNova += 1;
+      const info = await tx.prepare('INSERT INTO categorias (nome, slug, descricao, ordem) VALUES (?, ?, NULL, ?)')
+        .run(linha.nome, linha.slug, ordemNova);
+      categoriaIdDaLinha[linha.id] = info.lastInsertRowid;
+      categoriasCriadas++;
+    }
+
+    const memberships = await tx.prepare('SELECT produto_id, linha_id FROM produto_linhas').all();
+    let linhasMigradas = 0;
+    for (const m of memberships) {
+      const categoriaId = categoriaIdDaLinha[m.linha_id];
+      if (!categoriaId) continue;
+      await tx.prepare('INSERT OR IGNORE INTO produto_categorias (produto_id, categoria_id) VALUES (?, ?)')
+        .run(m.produto_id, categoriaId);
+      linhasMigradas++;
+    }
+
+    // Nada no código volta a ler estas tabelas a partir daqui.
+    await tx.prepare('DROP TABLE IF EXISTS produto_linhas').run();
+    await tx.prepare('DROP TABLE IF EXISTS linhas').run();
+
+    return { linhas_migradas: linhasMigradas, categorias_criadas: categoriasCriadas };
+  });
+  const resultado = await rodar();
+
+  await marcarFeito(db, 'categorias_linhas_unificadas');
+  return resultado;
 }
 
 async function migrar(db) {
@@ -276,6 +345,18 @@ async function migrar(db) {
 
   // ---------- catalogo: troca de linha de produtos (uma vez so) ----------
   if (await resetarCatalogoAntigo(db)) mudancas.push('catálogo antigo substituído pela nova lista de produtos');
+
+  // ---------- categorias / linhas: unificação (uma vez so) ----------
+  const unificacao = await unificarCategoriasLinhas(db);
+  if (unificacao) {
+    mudancas.push(`categorias e linhas unificadas (${unificacao.categorias_criadas} categoria(s) nova(s) a partir de linhas, `
+      + `${unificacao.linhas_migradas} vínculo(s) de linha migrado(s))`);
+  }
+
+  // ---------- agendamentos: serviço escolhido de uma lista cadastrada ----------
+  if (await adicionarColuna(db, 'agendamentos', 'servico_id', 'INTEGER REFERENCES servicos(id) ON DELETE SET NULL')) {
+    mudancas.push('agendamentos.servico_id');
+  }
 
   // ---------- funil por produto: marca de corte, sem apagar historico ----------
   // "Zerar" o funil (visualizacoes -> carrinho -> venda) sem excluir pedidos ou

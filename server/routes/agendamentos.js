@@ -3,17 +3,24 @@ const router = express.Router();
 const db = require('../db/db');
 const { exigirPapel } = require('../middleware/auth');
 
-// Cliente solicita um servico (ajustes, confeccao sob medida, etc.)
+// Cliente solicita um servico da lista cadastrada pelo admin (nunca texto
+// livre — ver routes/gestao.js e o <select> em public/agendar.html). O nome
+// vem do cadastro (não do que o cliente mandar), e fica gravado à parte
+// (servico_nome) para o agendamento continuar legível mesmo se o serviço for
+// renomeado ou excluído depois (agendamentos.servico_id vira NULL nesse caso).
 router.post('/', async (req, res) => {
-  const { servico_nome, data_servico, horario, local, responsavel, telefone_contato, observacoes } = req.body || {};
-  if (!servico_nome || !data_servico || !horario || !local || !responsavel || !telefone_contato) {
+  const { servico_id, data_servico, horario, local, responsavel, telefone_contato, observacoes } = req.body || {};
+  if (!servico_id || !data_servico || !horario || !local || !responsavel || !telefone_contato) {
     return res.status(400).json({ erro: 'Preencha serviço, data, horário, local, responsável e telefone.' });
   }
+  const servico = await db.prepare('SELECT id, nome FROM servicos WHERE id = ? AND ativo = 1').get(servico_id);
+  if (!servico) return res.status(400).json({ erro: 'Serviço inválido ou não está mais disponível.' });
+
   const usuarioId = req.session.usuario ? req.session.usuario.id : null;
   const info = await db.prepare(`INSERT INTO agendamentos
-    (usuario_id, servico_nome, data_servico, horario, local, responsavel, telefone_contato, observacoes, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente')`)
-    .run(usuarioId, servico_nome, data_servico, horario, local, responsavel, telefone_contato, observacoes || null);
+    (usuario_id, servico_id, servico_nome, data_servico, horario, local, responsavel, telefone_contato, observacoes, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente')`)
+    .run(usuarioId, servico.id, servico.nome, data_servico, horario, local, responsavel, telefone_contato, observacoes || null);
   res.status(201).json({ id: info.lastInsertRowid, mensagem: 'Solicitação enviada! Você será avisado assim que for analisada.' });
 });
 

@@ -1,6 +1,5 @@
 let USUARIO = null;
 let CATEGORIAS_CACHE = [];
-let LINHAS_CACHE = [];
 let PRODUTO_EM_EDICAO = null;
 // Produtos marcados na tabela para o reajuste de precos. Sobrevive a troca do
 // filtro de categoria de proposito: da' para marcar itens de categorias
@@ -27,7 +26,6 @@ async function iniciarPainel() {
     return;
   }
   CATEGORIAS_CACHE = await Api.get('/api/categorias');
-  LINHAS_CACHE = await Api.get('/api/linhas');
 
   // Itens do menu que dependem de permissao concedida pelo superadmin.
   document.querySelectorAll('[data-permissao]').forEach(item => {
@@ -63,6 +61,7 @@ const SECOES = {
   clientes: secaoClientes,
   csat: secaoCsat,
   agendamentos: secaoAgendamentos,
+  servicos: secaoServicos,
   encomendas: secaoEncomendas
 };
 
@@ -174,7 +173,8 @@ async function carregarTabelaProdutos() {
   [...PRODUTOS_MARCADOS].forEach(id => { if (!existentes.has(id)) PRODUTOS_MARCADOS.delete(id); });
 
   const catFiltro = document.getElementById('filtro-cat-admin').value;
-  const lista = catFiltro ? todos.filter(p => p.categoria_slug === catFiltro) : todos;
+  // Casa por qualquer categoria da qual o produto participe, não só a principal.
+  const lista = catFiltro ? todos.filter(p => p.categorias.some(c => c.slug === catFiltro)) : todos;
   document.getElementById('tbody-produtos').innerHTML = lista.map(p => `
     <tr>
       ${podeReajustar ? `<td class="col-marcar" data-label="Marcar"><input type="checkbox" class="marcar-produto" data-id="${p.id}" ${PRODUTOS_MARCADOS.has(p.id) ? 'checked' : ''}></td>` : ''}
@@ -183,7 +183,7 @@ async function carregarTabelaProdutos() {
         : '📷'}</span></td>
       <td class="col-secundaria" data-label="Código">${escapeHtml(p.codigo || '-')}</td>
       <td data-label="Nome">${escapeHtml(p.nome)}</td>
-      <td class="col-secundaria" data-label="Categoria">${escapeHtml(p.categoria_nome)}
+      <td class="col-secundaria" data-label="Categoria">${escapeHtml(p.categorias.map(c => c.nome).join(', ') || p.categoria_nome)}
         <br><small style="color:var(--texto-suave);">${
           p.publico === 'masculino' ? '♂ Masculino' : p.publico === 'feminino' ? '♀ Feminino' : 'Unissex'}</small></td>
       ${EH_SUPERADMIN() ? `<td class="col-secundaria" data-label="Custo">${formatarMoeda(p.custo)} <small style="color:var(--texto-suave);">(${p.custo_fonte})</small></td>` : ''}
@@ -232,10 +232,7 @@ async function abrirFormProduto(id) {
         <button type="button" class="btn pequeno secundario" id="pf-minimizar" style="border-color:var(--couro);color:var(--couro);">▲ Minimizar</button>
       </div>
       <div id="pf-corpo">
-      <div class="linha-dupla">
-        <div><label>Código</label><input id="pf-codigo" value="${p ? escapeHtml(p.codigo || '') : ''}"></div>
-        <div><label>Categoria</label><select id="pf-categoria">${CATEGORIAS_CACHE.map(c => `<option value="${c.id}" ${p && p.categoria_id === c.id ? 'selected' : ''}>${escapeHtml(c.nome)}</option>`).join('')}</select></div>
-      </div>
+      <label>Código</label><input id="pf-codigo" value="${p ? escapeHtml(p.codigo || '') : ''}">
       <label>Nome</label><input id="pf-nome" value="${p ? escapeHtml(p.nome) : ''}">
       <label>Descrição</label><textarea id="pf-descricao">${p ? escapeHtml(p.descricao || '') : ''}</textarea>
       <div class="linha-dupla">
@@ -268,14 +265,14 @@ async function abrirFormProduto(id) {
       <input id="pf-cores" value="${p ? p.cores.map(c => `${c.cor_nome}:${c.cor_hex}`).join(', ') : ''}" placeholder="preto:#111111, bege:#d2b48c">
       ${blocoFotosCoresHtml(p)}
 
-      <label>Linhas (nenhuma, uma, várias ou todas)</label>
+      <label>Categorias (ao menos uma)</label>
       <div class="grade-permissoes">
-        ${LINHAS_CACHE.map(l => `
+        ${CATEGORIAS_CACHE.map(c => `
           <label class="permissao-item">
-            <input type="checkbox" data-pf-linha value="${l.id}" ${p && p.linhas.some(pl => pl.id === l.id) ? 'checked' : ''}>
-            <span>${escapeHtml(l.nome)}</span>
+            <input type="checkbox" data-pf-categoria value="${c.id}" ${p ? (p.categorias.some(pc => pc.id === c.id) ? 'checked' : '') : (c.id === CATEGORIAS_CACHE[0].id ? 'checked' : '')}>
+            <span>${escapeHtml(c.nome)}</span>
           </label>
-        `).join('') || '<small style="color:var(--texto-suave);">Nenhuma linha cadastrada ainda — o superadmin cadastra em Linhas.</small>'}
+        `).join('') || '<small style="color:var(--texto-suave);">Nenhuma categoria cadastrada ainda — cadastre em Categorias.</small>'}
       </div>
 
       ${EH_SUPERADMIN() ? `
@@ -389,13 +386,16 @@ function publicoSugerido(descricao, nome, categoria) {
 function ligarPublicoPelaDescricao(p) {
   const descricao = document.getElementById('pf-descricao');
   const nome = document.getElementById('pf-nome');
-  const categoria = document.getElementById('pf-categoria');
+  const categorias = document.querySelectorAll('[data-pf-categoria]');
   const publico = document.getElementById('pf-publico');
   const aviso = document.getElementById('pf-publico-auto');
   if (!descricao || !publico) return;
 
+  // Primeira categoria marcada — mesmo papel que a categoria "principal" tinha
+  // antes, só para sugerir o público pelo nome quando descrição e nome não dizem nada.
   const nomeDaCategoria = () => {
-    const escolhida = CATEGORIAS_CACHE.find(c => String(c.id) === categoria.value);
+    const marcada = [...categorias].find(c => c.checked);
+    const escolhida = marcada && CATEGORIAS_CACHE.find(c => String(c.id) === marcada.value);
     return escolhida ? escolhida.nome : '';
   };
 
@@ -416,7 +416,7 @@ function ligarPublicoPelaDescricao(p) {
 
   descricao.addEventListener('input', aplicar);
   nome.addEventListener('input', aplicar);
-  categoria.addEventListener('change', aplicar);
+  categorias.forEach(c => c.addEventListener('change', aplicar));
   // Produto novo comeca em branco: ja deixa o campo coerente com o que houver.
   if (!p) aplicar();
 }
@@ -640,7 +640,7 @@ function parseCores() {
 async function salvarProduto(id) {
   const msg = document.getElementById('pf-msg');
   const corpo = {
-    categoria_id: parseInt(document.getElementById('pf-categoria').value, 10),
+    categorias_ids: [...document.querySelectorAll('[data-pf-categoria]:checked')].map(c => parseInt(c.value, 10)),
     codigo: document.getElementById('pf-codigo').value,
     nome: document.getElementById('pf-nome').value,
     descricao: document.getElementById('pf-descricao').value,
@@ -649,9 +649,12 @@ async function salvarProduto(id) {
     imagem_url: document.getElementById('pf-imagem').value,
     destaque: document.getElementById('pf-destaque').checked,
     tamanhos: parseTamanhos(),
-    cores: parseCores(),
-    linhas_ids: [...document.querySelectorAll('[data-pf-linha]:checked')].map(c => parseInt(c.value, 10))
+    cores: parseCores()
   };
+  if (!corpo.categorias_ids.length) {
+    msg.textContent = 'Selecione ao menos uma categoria.'; msg.className = 'msg erro'; msg.style.display = 'block';
+    return;
+  }
   const botao = document.getElementById('pf-salvar');
   botao.disabled = true;
   try {
@@ -663,7 +666,7 @@ async function salvarProduto(id) {
       produtoId = resp.id;
     }
     await Api.put(`/api/gestao/produtos/${produtoId}/tamanhos-cores`, { tamanhos: corpo.tamanhos, cores: corpo.cores });
-    await Api.put(`/api/gestao/produtos/${produtoId}/linhas`, { linhas_ids: corpo.linhas_ids });
+    await Api.put(`/api/gestao/produtos/${produtoId}/categorias`, { categorias_ids: corpo.categorias_ids });
     // Custo, preco e promocao NAO passam pelo PUT acima: a rota de gestao ignora
     // esses campos de proposito (so o superadmin mexe em valor, por rotas
     // proprias). Antes disso, quem editava o preco e clicava em "Salvar" via a
@@ -1058,10 +1061,12 @@ function ligarCategorias(categorias) {
   document.querySelectorAll('[data-excluir-categoria]').forEach(b => b.addEventListener('click', () => {
     const categoria = categorias.find(c => c.id === Number(b.dataset.excluirCategoria));
     if (!categoria) return;
-    // Categoria vazia sai direto; com produtos, a linha vira o painel de destino
-    // (produtos.categoria_id e' obrigatorio — ninguem fica sem categoria).
-    if (!categoria.total_produtos) {
-      if (!confirm(`Excluir a categoria "${categoria.nome}"?`)) return;
+    // Só pede destino quando algum produto tem ESTA categoria como principal
+    // (produtos.categoria_id e' obrigatorio — ninguem fica sem categoria
+    // principal). Produto que só tem esta como "extra" não precisa de
+    // destino: perde só essa participação e continua com as outras que já tinha.
+    if (!categoria.total_principal) {
+      if (!confirm(`Excluir a categoria "${categoria.nome}"?${categoria.total_produtos ? ` ${categoria.total_produtos} produto(s) deixam de participar dela (continuam com as outras categorias que já têm).` : ''}`)) return;
       excluirCategoria(categoria, null);
       return;
     }
@@ -1078,7 +1083,7 @@ function abrirDestinoDosProdutos(categoria, categorias) {
   const celula = document.querySelector(`[data-linha-categoria="${categoria.id}"]`).lastElementChild;
   celula.innerHTML = `
     <div style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;">
-      <span style="font-size:.82rem;">${categoria.total_produtos} produto(s) vão para:</span>
+      <span style="font-size:.82rem;">${categoria.total_principal} produto(s) vão para:</span>
       <select id="ctg-destino">${outras.map(c => `<option value="${c.id}">${escapeHtml(c.nome)}</option>`).join('')}</select>
       <button class="btn pequeno perigo" id="ctg-confirmar-exclusao">Mover e excluir</button>
       <button class="btn pequeno secundario" id="ctg-cancelar-exclusao" style="border-color:var(--couro);color:var(--couro);">Cancelar</button>
@@ -1096,7 +1101,7 @@ async function excluirCategoria(categoria, destinoId) {
     await recarregarCategoriasCache();
     const destino = destinoId && CATEGORIAS_CACHE.find(c => c.id === Number(destinoId));
     secaoCategorias(destino
-      ? `Categoria "${categoria.nome}" excluída. ${categoria.total_produtos} produto(s) foram para "${destino.nome}".`
+      ? `Categoria "${categoria.nome}" excluída. ${categoria.total_principal} produto(s) foram para "${destino.nome}".`
       : `Categoria "${categoria.nome}" excluída.`);
   } catch (e) {
     avisoCategoria(e.message, true);
@@ -2063,6 +2068,143 @@ async function secaoAgendamentos() {
     secaoAgendamentos();
   }));
   document.querySelectorAll('[data-concluir]').forEach(b => b.addEventListener('click', async () => { await Api.put(`/api/agendamentos/${b.dataset.concluir}/concluir`); secaoAgendamentos(); }));
+}
+
+// ==================== SERVIÇOS (agendamento) ====================
+// Lista da qual o cliente escolhe em agendar.html — nunca texto livre. Cada
+// serviço cobra por valor fixo ou por unidade de tempo (dias/horas/minutos).
+let SERVICO_EM_EDICAO = null;
+
+function textoCobrancaServico(s) {
+  if (s.tipo_cobranca === 'tempo') {
+    const unidade = { dias: 'dia', horas: 'hora', minutos: 'minuto' }[s.unidade_tempo] || s.unidade_tempo;
+    return `${formatarMoeda(s.valor_unidade)} por ${unidade}`;
+  }
+  return `${formatarMoeda(s.valor_fixo)} (valor fechado)`;
+}
+
+function formularioServicoHtml(s) {
+  const tempo = s ? s.tipo_cobranca === 'tempo' : false;
+  return `
+    <div class="linha-dupla">
+      <div><label>Nome</label><input id="srv-nome" placeholder="Ex.: Ajuste de bombacha" value="${s ? escapeHtml(s.nome) : ''}"></div>
+      <div><label>Ordem na lista</label><input id="srv-ordem" type="number" step="1" placeholder="fim da lista" value="${s ? s.ordem : ''}"></div>
+    </div>
+    <label>Descrição (opcional, aparece pro cliente)</label>
+    <input id="srv-descricao" value="${s && s.descricao ? escapeHtml(s.descricao) : ''}">
+    <label>Forma de cobrança</label>
+    <div class="linha-dupla">
+      <select id="srv-tipo-cobranca">
+        <option value="fixo" ${!tempo ? 'selected' : ''}>Valor fixo</option>
+        <option value="tempo" ${tempo ? 'selected' : ''}>Por tempo (dias, horas ou minutos)</option>
+      </select>
+      <div></div>
+    </div>
+    <div class="linha-dupla" id="srv-campos-fixo" ${tempo ? 'hidden' : ''}>
+      <div><label>Valor (R$)</label><input id="srv-valor-fixo" type="number" step="0.01" value="${s && s.valor_fixo != null ? s.valor_fixo : ''}"></div>
+      <div></div>
+    </div>
+    <div class="linha-dupla" id="srv-campos-tempo" ${tempo ? '' : 'hidden'}>
+      <div><label>Valor por unidade (R$)</label><input id="srv-valor-unidade" type="number" step="0.01" value="${s && s.valor_unidade != null ? s.valor_unidade : ''}"></div>
+      <div><label>Unidade de tempo</label>
+        <select id="srv-unidade-tempo">
+          ${['dias', 'horas', 'minutos'].map(u => `<option value="${u}" ${s && s.unidade_tempo === u ? 'selected' : ''}>${u[0].toUpperCase() + u.slice(1)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <button class="btn mt-1" id="srv-salvar">${s ? 'Salvar alterações' : 'Criar serviço'}</button>
+    ${s ? '<button class="btn secundario" id="srv-cancelar" style="border-color:var(--couro);color:var(--couro);">Cancelar edição</button>' : ''}
+    <p id="srv-msg" class="msg" style="display:none;"></p>
+  `;
+}
+
+async function secaoServicos(aviso) {
+  const servicos = await Api.get('/api/gestao/servicos');
+  const emEdicao = servicos.find(s => s.id === SERVICO_EM_EDICAO) || null;
+
+  document.getElementById('conteudo-secao').innerHTML = `
+    <div class="card">
+      <h3>${emEdicao ? `✏️ Editando “${escapeHtml(emEdicao.nome)}”` : '+ Novo serviço'}</h3>
+      ${formularioServicoHtml(emEdicao)}
+    </div>
+    <div class="tabela-wrap"><table>
+      <thead><tr><th>Ordem</th><th>Nome</th><th>Cobrança</th><th>Status</th><th>Ações</th></tr></thead>
+      <tbody>${servicos.map(s => `
+        <tr>
+          <td data-label="Ordem">${s.ordem}</td>
+          <td data-label="Nome"><strong>${escapeHtml(s.nome)}</strong>${s.descricao ? `<br><small style="color:var(--texto-suave);">${escapeHtml(s.descricao)}</small>` : ''}</td>
+          <td data-label="Cobrança">${textoCobrancaServico(s)}</td>
+          <td data-label="Status">${s.ativo ? '<span class="badge ok">Ativo</span>' : '<span class="badge indisponivel">Inativo</span>'}</td>
+          <td data-label="Ações" style="white-space:nowrap;">
+            <button class="btn pequeno" data-editar-servico="${s.id}">Editar</button>
+            <button class="btn pequeno secundario" style="border-color:var(--couro);color:var(--couro);" data-toggle-servico="${s.id}" data-ativo="${s.ativo ? 1 : 0}">${s.ativo ? 'Inativar' : 'Ativar'}</button>
+            <button class="btn pequeno perigo" data-excluir-servico="${s.id}">Excluir</button>
+          </td>
+        </tr>
+      `).join('') || '<tr><td colspan="5">Nenhum serviço cadastrado.</td></tr>'}</tbody>
+    </table></div>
+  `;
+
+  ligarServicos();
+  if (aviso) {
+    const alvo = document.getElementById('srv-msg');
+    alvo.textContent = aviso; alvo.className = 'msg sucesso'; alvo.style.display = 'block';
+  }
+}
+
+function ligarServicos() {
+  const tipoCobranca = document.getElementById('srv-tipo-cobranca');
+  tipoCobranca.addEventListener('change', () => {
+    const tempo = tipoCobranca.value === 'tempo';
+    document.getElementById('srv-campos-fixo').hidden = tempo;
+    document.getElementById('srv-campos-tempo').hidden = !tempo;
+  });
+
+  document.getElementById('srv-salvar').addEventListener('click', async () => {
+    const msg = document.getElementById('srv-msg');
+    const ordem = document.getElementById('srv-ordem').value;
+    const corpo = {
+      nome: document.getElementById('srv-nome').value,
+      descricao: document.getElementById('srv-descricao').value,
+      tipo_cobranca: tipoCobranca.value,
+      valor_fixo: document.getElementById('srv-valor-fixo').value,
+      valor_unidade: document.getElementById('srv-valor-unidade').value,
+      unidade_tempo: document.getElementById('srv-unidade-tempo').value,
+      ordem: ordem === '' ? null : ordem
+    };
+    try {
+      if (SERVICO_EM_EDICAO) {
+        await Api.put(`/api/gestao/servicos/${SERVICO_EM_EDICAO}`, corpo);
+      } else {
+        await Api.post('/api/gestao/servicos', corpo);
+      }
+      const salvo = SERVICO_EM_EDICAO;
+      SERVICO_EM_EDICAO = null;
+      secaoServicos(salvo ? 'Serviço atualizado.' : 'Serviço criado.');
+    } catch (e) {
+      msg.textContent = e.message; msg.className = 'msg erro'; msg.style.display = 'block';
+    }
+  });
+
+  const cancelar = document.getElementById('srv-cancelar');
+  if (cancelar) cancelar.addEventListener('click', () => { SERVICO_EM_EDICAO = null; secaoServicos(); });
+
+  document.querySelectorAll('[data-editar-servico]').forEach(b => b.addEventListener('click', async () => {
+    SERVICO_EM_EDICAO = Number(b.dataset.editarServico);
+    await secaoServicos();
+    focarNaTela(document.querySelector('#conteudo-secao .card'), 'srv-nome');
+  }));
+
+  document.querySelectorAll('[data-toggle-servico]').forEach(b => b.addEventListener('click', async () => {
+    await Api.put(`/api/gestao/servicos/${b.dataset.toggleServico}/ativo`, { ativo: b.dataset.ativo === '0' });
+    secaoServicos();
+  }));
+
+  document.querySelectorAll('[data-excluir-servico]').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Excluir este serviço? Agendamentos já feitos com ele continuam registrados, só não poderá mais ser escolhido de novo.')) return;
+    await Api.del(`/api/gestao/servicos/${b.dataset.excluirServico}`);
+    secaoServicos();
+  }));
 }
 
 // ==================== ENCOMENDAS / AVISOS ====================

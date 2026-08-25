@@ -111,12 +111,16 @@ router.get('/catalogo', exigirPermissao('exportar_catalogo'), async (req, res) =
     filtro += ' AND p.destaque = 1';
   }
 
+  // Passa por produto_categorias (não só categoria_id): um produto em mais de
+  // uma categoria selecionada aparece uma vez em cada seção correspondente —
+  // é o mesmo comportamento de "participar de várias categorias" da loja.
   const linhas = await db.prepare(`
     SELECT p.id, p.codigo, p.nome, p.descricao, p.preco_venda, p.preco_promocional,
            p.destaque, p.tipo_estoque, p.imagem_url,
            c.id AS categoria_id, c.nome AS categoria_nome, c.slug AS categoria_slug, c.ordem AS categoria_ordem
     FROM produtos p
-    JOIN categorias c ON c.id = p.categoria_id
+    JOIN produto_categorias pc ON pc.produto_id = p.id
+    JOIN categorias c ON c.id = pc.categoria_id
     ${filtro}
     ORDER BY c.ordem ASC, c.nome ASC, p.nome ASC
   `).all(...params);
@@ -175,7 +179,8 @@ router.get('/catalogo', exigirPermissao('exportar_catalogo'), async (req, res) =
     publico,
     inclui_unissex: publico ? incluirUnissex : null,
     somente_destaque: somenteDestaque,
-    total_produtos: linhas.length,
+    // Produto contado uma vez só mesmo aparecendo em mais de uma seção.
+    total_produtos: new Set(linhas.map(l => l.id)).size,
     gerado_em: new Date().toISOString(),
     categorias
   });

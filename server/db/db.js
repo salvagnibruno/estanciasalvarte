@@ -136,7 +136,7 @@ async function iniciar() {
 
   const seedResult = await seed(db);
   if (!seedResult.skipped) {
-    console.log(`[seed] ${seedResult.categorias} categorias, ${seedResult.linhas} linhas e ${seedResult.total} produtos cadastrados.`);
+    console.log(`[seed] ${seedResult.categorias} categorias e ${seedResult.total} produtos cadastrados.`);
   }
 
   const SUPERADMIN_EMAIL = 'bruno.salvagni@gmail.com';
