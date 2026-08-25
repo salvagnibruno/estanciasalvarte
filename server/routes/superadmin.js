@@ -477,7 +477,15 @@ router.get('/relatorios/resumo', async (req, res) => {
     FROM pedido_itens pi JOIN pedidos p ON p.id = pi.pedido_id
     WHERE p.status IN ('pago','enviado','recebido','finalizado')
   `).get()).v;
-  const carrinhosAbertos = (await db.prepare(`SELECT COUNT(*) n FROM carrinhos WHERE status = 'aberto'`).get()).n;
+  // "Aberto" so' conta se tiver pelo menos 1 item: obterCarrinhoAtual (routes/
+  // carrinho.js) cria a linha em carrinhos assim que a pessoa so' ABRE a tela do
+  // carrinho (antes de colocar qualquer coisa), entao' sem este filtro o numero
+  // incluia carrinho vazio - o que tambem inflava esse card sem bater com
+  // "Produtos mais colocados no carrinho" (que so' conta quem tem item de fato).
+  const carrinhosAbertos = (await db.prepare(`
+    SELECT COUNT(*) n FROM carrinhos c
+    WHERE c.status = 'aberto' AND EXISTS (SELECT 1 FROM carrinho_itens ci WHERE ci.carrinho_id = c.id)
+  `).get()).n;
   const agendamentosPendentes = (await db.prepare(`SELECT COUNT(*) n FROM agendamentos WHERE status = 'pendente'`).get()).n;
   const encomendasAbertas = (await db.prepare(`SELECT COUNT(*) n FROM encomendas WHERE status = 'aguardando'`).get()).n;
 
@@ -509,21 +517,29 @@ router.get('/relatorios/carrinho-abandonado', async (req, res) => {
 
 // Carrinhos válidos (status 'aberto') de clientes LOGADOS, com o que dá para
 // saber sobre cada um — clica no card "Carrinhos em aberto" do resumo. Carrinho
-// de visitante (sem login) não entra: não haveria como contatar quem é. CPF é
-// "o que tiver": a conta de login não pede CPF no cadastro, então só aparece se
-// o mesmo e-mail/telefone já tiver aparecido num pedido anterior (tabela
-// clientes) — pode vir vazio para quem nunca comprou.
+// de visitante (sem login) não entra: não haveria como contatar quem é. CPF e
+// telefone sao' "o que tiver": a conta de login não exige CPF no cadastro (e o
+// telefone e' opcional), entao' os dois completam pela tabela clientes quando
+// o mesmo e-mail/telefone ja' apareceu num pedido anterior — pode vir vazio
+// para quem nunca comprou.
+// EXISTS carrinho_itens: nunca lista carrinho vazio (ver comentario em
+// /relatorios/resumo) — carrinho sem item não tem valor pra' mostrar, e um
+// card "R$ 0,00" pra' um cliente identificado e' informação errada.
 router.get('/relatorios/carrinhos-abertos', async (req, res) => {
   const carrinhos = await db.prepare(`
     SELECT c.id, c.criado_em, c.atualizado_em,
-           u.nome AS usuario_nome, u.email AS usuario_email, u.telefone AS usuario_telefone,
+           u.nome AS usuario_nome, u.email AS usuario_email,
+           COALESCE(u.telefone, (SELECT cl.telefone FROM clientes cl
+              WHERE (u.email IS NOT NULL AND cl.email = u.email)
+                 OR (u.telefone IS NOT NULL AND cl.telefone = u.telefone)
+              LIMIT 1)) AS usuario_telefone,
            (SELECT cl.cpf FROM clientes cl
               WHERE (u.email IS NOT NULL AND cl.email = u.email)
                  OR (u.telefone IS NOT NULL AND cl.telefone = u.telefone)
               LIMIT 1) AS cpf
     FROM carrinhos c
     JOIN usuarios u ON u.id = c.usuario_id
-    WHERE c.status = 'aberto'
+    WHERE c.status = 'aberto' AND EXISTS (SELECT 1 FROM carrinho_itens ci WHERE ci.carrinho_id = c.id)
     ORDER BY c.atualizado_em DESC
   `).all();
 
