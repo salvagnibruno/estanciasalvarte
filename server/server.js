@@ -31,8 +31,8 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Sessão guardada inteira num cookie assinado (sem tabela de sessão no banco):
-// funciona sem nenhuma mudança em hospedagem com disco efêmero (Render free,
-// por exemplo) — a sessão não some quando a instância reinicia.
+// não depende de disco nem de banco, então a sessão sobrevive ao reinício da
+// máquina do Fly a cada deploy — ninguém é deslogado ao publicar uma versão.
 app.use(cookieSession({
   name: 'estancia.sid',
   keys: [process.env.SESSION_SECRET || 'estancia-salvarte-troque-esta-chave'],

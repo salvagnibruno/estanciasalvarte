@@ -15,7 +15,7 @@ const isRemoto = !!TURSO_URL;
 // RÉPLICA EMBARCADA (desativada por ora): tentei usar a "embedded replica" do
 // libsql (arquivo local sincronizado com o Turso) pra tornar as leituras
 // instantâneas — mas isso quebrou o checkout em produção de um jeito que não
-// consigo depurar por completo sem acesso à conta Turso/aos logs do Render.
+// consigo depurar por completo sem acesso à conta Turso/aos logs do Fly.
 // Como a prioridade agora é o cliente conseguir comprar, voltamos ao cliente
 // 100% remoto (mais lento, mas é o que estava funcionando). Ver histórico do
 // git para a versão com réplica embarcada, se quisermos retomar depois com

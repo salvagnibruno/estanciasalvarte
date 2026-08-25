@@ -12,7 +12,7 @@ let Preference = null;
 let Payment = null;
 
 // .trim() de proposito: colar o token num campo de variavel de ambiente
-// (Render, Fly, etc.) facilmente entra com um espaco ou quebra de linha
+// (`fly secrets set`, por exemplo) facilmente entra com um espaco ou quebra de linha
 // grudado, e o header "Authorization: Bearer <token>" vira invalido sem
 // nenhum aviso visivel — a API do Mercado Pago devolve so um 403 generico
 // ("At least one policy returned UNAUTHORIZED"), sem indicar o motivo.

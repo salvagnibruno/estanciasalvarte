@@ -7,9 +7,11 @@ painel superadmin com relatórios.
 ## Stack usada
 
 - **Backend:** Node.js + Express
-- **Banco de dados:** SQLite (arquivo `db/estancia.db`), acessado via `better-sqlite3`. Todos os dados
-  ficam em **tabelas relacionais** (produtos, categorias, usuários, pedidos, carrinho, agendamentos,
-  encomendas, histórico de preços, eventos de analytics) — nada é salvo em JSON solto.
+- **Banco de dados:** SQLite acessado pelo `@libsql/client` — em produção é o **Turso** (SQLite
+  gerenciado na nuvem, ver "Hospedagem"); localmente, sem as variáveis do Turso, é o arquivo
+  `db/estancia.db`. Todos os dados ficam em **tabelas relacionais** (produtos, categorias, usuários,
+  pedidos, carrinho, agendamentos, encomendas, histórico de preços, eventos de analytics) — nada é
+  salvo em JSON solto.
 - **Frontend:** HTML + CSS + JavaScript puro (sem build step), servido como arquivos estáticos pelo
   próprio Express a partir de `public/`.
 - **Pagamentos:** SDK oficial `mercadopago` (Checkout Pro — cartão de crédito, débito e Pix, tudo
@@ -149,8 +151,9 @@ Sem configurar nada, o checkout ainda funciona: o pedido é registrado com a op�
    é redirecionado para o Checkout Pro do Mercado Pago, e o webhook (`/api/pagamento/webhook`) atualiza o
    pedido automaticamente para "pago" e dá baixa no estoque.
 
-Em produção, o Mercado Pago precisa conseguir alcançar `SEU_DOMINIO/api/pagamento/webhook` pela internet
-— então isso só funciona depois de hospedado (não funciona com `localhost`).
+Em produção, o Mercado Pago precisa conseguir alcançar o webhook pela internet — hoje
+`https://estancia-salvarte.fly.dev/api/pagamento/webhook` (a URL é montada a partir do domínio da
+requisição, então acompanha o domínio final quando ele for apontado). Com `localhost` não funciona.
 
 ## Estrutura de pastas
 
@@ -170,40 +173,44 @@ server/
   public/               todo o site (html/css/js), + /admin e /superadmin (painéis)
 ```
 
-## Onde hospedar de graça
+## Hospedagem (produção)
 
-Como o site guarda tudo em um arquivo SQLite (`db/estancia.db`), o ponto principal na hora de escolher
-hospedagem gratuita é: **o disco precisa ser persistente** (não pode apagar o arquivo a cada deploy/reinício).
+O site oficial está no ar em **https://estancia-salvarte.fly.dev** — hospedado no **Fly.io** (app
+`estancia-salvarte`, região `gru`/São Paulo). Esse é o único ambiente: o Render.com não é mais usado e o
+`render.yaml` saiu do repositório.
 
-**Atualização (2026):** o cenário de hospedagem gratuita mudou bastante nos últimos anos — hoje **não
-existe mais** uma opção que seja ao mesmo tempo grátis para sempre, sem pedir cartão e com disco
-persistente. Fly.io, por exemplo, encerrou o plano gratuito para contas novas (hoje pede cartão desde o
-cadastro). As opções realistas em 2026:
+**Como está montado:**
 
-1. **App em host gratuito (sem disco persistente) + banco gerenciado à parte** — ex.: Render.com free
-   (web service Node gratuito, sem cartão) + **Turso** (SQLite compatível na nuvem, plano gratuito sem
-   cartão, com console web para consultar/editar dados — atende ao "acesso ao banco para manutenção").
-   Exige trocar `better-sqlite3` por `@libsql/client` nas queries (mudança de código: chamadas passam a
-   ser assíncronas). É o caminho que preserva o SQL quase idêntico ao que já existe.
-2. **App em host gratuito + Postgres gerenciado** — Render.com free (app) + **Supabase** ou **Neon**
-   (Postgres gratuito, sem cartão, com editor de tabelas/SQL pela web). Exige uma migração maior (sintaxe
-   SQL do Postgres é diferente da do SQLite em vários pontos).
-3. **VPS com disco persistente de verdade** — ex. Oracle Cloud "Always Free" (máquina pequena grátis
-   permanente, mas pede cartão para verificar identidade no cadastro, sem cobrança dentro do limite
-   gratuito). Roda o código exatamente como está, sem nenhuma mudança — é o único caminho que não exige
-   tocar no banco de dados.
-4. **Hospedagem paga de baixo custo** (Railway, Render pago, VPS barata) — sem as pegadinhas de card/roteiro
-   acima, com um custo mensal pequeno.
+- **App:** contêiner Docker construído pelo `Dockerfile` da raiz (Node 20 + `npm ci`), configurado no
+  `fly.toml` — porta interna 3000, HTTPS forçado e 1 máquina sempre ligada
+  (`min_machines_running = 1`, `auto_stop_machines = false`, para não ter partida a frio na primeira visita).
+- **Banco:** **Turso** (SQLite gerenciado na nuvem), acessado pelo `@libsql/client`. As credenciais
+  (`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN`) são secrets do Fly, nunca do repositório. Na primeira subida
+  com o banco remoto vazio, o `db/db.js` importa o `db/estancia.db` versionado aqui (catálogo, preços e
+  cadastros atuais); nas subidas seguintes nada é sobrescrito.
+- **Volume `estancia_data`** (montado em `/data`, via `DB_PATH` no `fly.toml`): caminho de reserva, usado
+  só se as variáveis do Turso não estiverem definidas — aí o banco vira um arquivo em disco persistente em
+  vez do Turso. Com os secrets configurados (situação atual), o volume fica ocioso.
+- **Sessão:** cookie assinado (`SESSION_SECRET`), sem tabela no banco — deploy ou reinício da máquina não
+  desloga ninguém.
 
-Cada caminho tem um trade-off diferente (cartão exigido vs. quantidade de código a mudar vs. custo) — vale
-decidir junto antes de seguir com a publicação.
+**Deploy** (rodar na raiz do repositório, onde estão o `Dockerfile` e o `fly.toml`):
 
-**Importante:** antes de apontar o domínio final, faça uma cópia de segurança do arquivo
-`server/db/estancia.db` (ele já tem todo o catálogo, preços e o usuário superadmin cadastrados). Bastando
-copiar esse arquivo para a pasta `db/` do servidor novo, todo o cadastro que você já fez continua exatamente
-como está — nenhuma informação se perde na migração. Numa base vazia, o catálogo de produtos também é
-recriado automaticamente pelo `seed.js` — mas qualquer ajuste manual feito depois pelo painel (fotos,
-preços, destaques) só existe no arquivo `estancia.db` atual, por isso a cópia é importante.
+```bash
+fly deploy
+```
+
+Comandos úteis: `fly status`, `fly logs`, `fly secrets list` (mostra só os nomes),
+`fly secrets set CHAVE=valor`.
+
+**Variáveis de ambiente em produção** — todas por `fly secrets set`, nunca no `.env` (que existe apenas na
+máquina local e está no `.gitignore`): `SESSION_SECRET`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`,
+`MERCADOPAGO_ACCESS_TOKEN`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USER`, `EMAIL_PASS`, `EMAIL_FROM`.
+
+**Backup:** com o banco no Turso, a cópia de segurança sai de lá (console web ou CLI do Turso). O
+`server/db/estancia.db` versionado no repositório continua sendo o retrato usado para semear um ambiente
+novo do zero — vale atualizá-lo antes de qualquer migração, porque os ajustes feitos pelo painel (fotos,
+preços, destaques) só existem no banco de produção.
 
 ## Próximos passos sugeridos
 
