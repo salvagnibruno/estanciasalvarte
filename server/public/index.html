@@ -79,7 +79,8 @@ const vitrine = { categoria: '', busca: '', ordem: 'nome', categorias: [] };
 
 // ==================== MENU DE CATEGORIAS ====================
 async function carregarCategorias() {
-  vitrine.categorias = await Api.get('/api/categorias');
+  // Categoria sem nenhum produto ativo não aparece pro cliente.
+  vitrine.categorias = (await Api.get('/api/categorias')).filter(c => c.total_produtos > 0);
   const menu = document.getElementById('menu-categorias');
 
   menu.innerHTML = `

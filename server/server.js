@@ -145,10 +145,19 @@ db.iniciar()
 
     // Varre pedidos vencidos a cada 5 minutos e marca como Desistência (ver
     // server/utils/expiracao.js). So' comeca depois que o banco esta pronto.
-    const { flipPedidosExpirados } = require('./utils/expiracao');
+    const { flipPedidosExpirados, limparCarrinhosExpirados } = require('./utils/expiracao');
     setInterval(() => {
       flipPedidosExpirados().catch(e => console.error('[expiracao] erro:', e.message));
     }, 5 * 60 * 1000);
+
+    // Carrinho de visitante com mais de 30 dias: varredura bem mais espaçada
+    // (o prazo e' de semanas, nao minutos — nao ha' motivo pra' consultar isso
+    // com a mesma frequencia dos pedidos). Roda uma vez logo na subida tambem,
+    // pra' nao depender de o processo ficar de pe' por 1h so pra' comecar.
+    limparCarrinhosExpirados().catch(e => console.error('[expiracao] erro:', e.message));
+    setInterval(() => {
+      limparCarrinhosExpirados().catch(e => console.error('[expiracao] erro:', e.message));
+    }, 60 * 60 * 1000);
   })
   .catch(e => {
     console.error('[startup] não foi possível iniciar o banco de dados:', e);

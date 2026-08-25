@@ -7,9 +7,11 @@ async function montarProduto(row, { incluirCusto } = { incluirCusto: false }) {
   // `imagem_url` da cor alimenta a troca de foto na pagina do produto.
   const cores = await db.prepare('SELECT id, cor_nome, cor_hex, imagem_url FROM produto_cores WHERE produto_id = ? ORDER BY id').all(row.id);
   const estoque = await db.prepare('SELECT tamanho, cor, quantidade FROM produto_estoque WHERE produto_id = ?').all(row.id);
-  const linhas = await db.prepare(`
-    SELECT l.id, l.nome, l.slug FROM produto_linhas pl JOIN linhas l ON l.id = pl.linha_id
-    WHERE pl.produto_id = ? ORDER BY l.ordem ASC
+  // Todas as categorias das quais o produto participa (a principal, em
+  // categoria_id/categoria_nome/categoria_slug abaixo, sempre está incluída).
+  const categorias = await db.prepare(`
+    SELECT c.id, c.nome, c.slug FROM produto_categorias pc JOIN categorias c ON c.id = pc.categoria_id
+    WHERE pc.produto_id = ? ORDER BY c.ordem ASC
   `).all(row.id);
   const estoqueTotal = estoque.reduce((soma, e) => soma + e.quantidade, 0);
   // Promocao so vale se for um valor menor que o preco cheio.
@@ -37,7 +39,7 @@ async function montarProduto(row, { incluirCusto } = { incluirCusto: false }) {
     criado_em: row.criado_em, // a vitrine usa para marcar "novidade"
     tamanhos,
     cores,
-    linhas,
+    categorias,
     estoque,
     estoque_total: estoqueTotal,
     disponivel: row.tipo_estoque === 'estoque' ? estoqueTotal > 0 : true
@@ -51,25 +53,31 @@ async function montarProduto(row, { incluirCusto } = { incluirCusto: false }) {
   return produto;
 }
 
-// GET /api/categorias
+// GET /api/categorias — usado pelo menu/filtro público (index.html, catalogo.html)
+// e pelo cadastro de produto do painel. total_produtos conta QUALQUER produto
+// que participe da categoria (produto_categorias), não só quem a tem como
+// principal — uma categoria só usada como "extra" não pode parecer vazia.
 router.get('/categorias', async (req, res) => {
   const categorias = await db.prepare(`
-    SELECT c.*, (SELECT COUNT(*) FROM produtos p WHERE p.categoria_id = c.id AND p.ativo = 1) AS total_produtos
+    SELECT c.*, (
+      SELECT COUNT(*) FROM produto_categorias pc JOIN produtos p ON p.id = pc.produto_id
+      WHERE pc.categoria_id = c.id AND p.ativo = 1
+    ) AS total_produtos
     FROM categorias c ORDER BY ordem ASC
   `).all();
   res.json(categorias);
 });
 
-// GET /api/linhas — usado pelo filtro do catálogo público e pelo cadastro de produto.
-router.get('/linhas', async (req, res) => {
-  const linhas = await db.prepare(`
-    SELECT l.*, (
-      SELECT COUNT(*) FROM produto_linhas pl JOIN produtos p ON p.id = pl.produto_id
-      WHERE pl.linha_id = l.id AND p.ativo = 1
-    ) AS total_produtos
-    FROM linhas l ORDER BY l.ordem ASC
-  `).all();
-  res.json(linhas);
+// GET /api/servicos — lista pública dos serviços de agendamento cadastrados
+// pelo admin (ver routes/gestao.js), para o cliente escolher em agendar.html.
+// Só os ativos: um serviço desativado sai da lista, mas os agendamentos que já
+// o citam continuam guardando o nome (ver schema.sql/agendamentos.servico_nome).
+router.get('/servicos', async (req, res) => {
+  const servicos = await db.prepare(
+    `SELECT id, nome, descricao, tipo_cobranca, valor_fixo, valor_unidade, unidade_tempo
+     FROM servicos WHERE ativo = 1 ORDER BY ordem ASC, nome ASC`
+  ).all();
+  res.json(servicos);
 });
 
 // Preco que vale para o cliente (promocional quando houver).
@@ -85,17 +93,21 @@ const ORDENACOES = {
   novidades: 'p.criado_em DESC, p.nome ASC'
 };
 
-// GET /api/produtos?categoria=slug&linha=slug&busca=termo&ordem=nome&destaque=1
+// GET /api/produtos?categoria=slug&busca=termo&ordem=nome&destaque=1
 router.get('/produtos', async (req, res) => {
-  const { categoria, linha, busca, destaque } = req.query;
+  const { categoria, busca, destaque } = req.query;
   let sql = `SELECT p.*, c.nome AS categoria_nome, c.slug AS categoria_slug
              FROM produtos p JOIN categorias c ON c.id = p.categoria_id
              WHERE p.ativo = 1`;
   const params = [];
-  if (categoria) { sql += ' AND c.slug = ?'; params.push(categoria); }
-  if (linha) {
-    sql += ` AND p.id IN (SELECT pl.produto_id FROM produto_linhas pl JOIN linhas l ON l.id = pl.linha_id WHERE l.slug = ?)`;
-    params.push(linha);
+  if (categoria) {
+    // Casa por QUALQUER categoria da qual o produto participe, não só a
+    // principal — um produto pode estar em várias (ver produto_categorias).
+    sql += ` AND p.id IN (
+      SELECT pc.produto_id FROM produto_categorias pc JOIN categorias cc ON cc.id = pc.categoria_id
+      WHERE cc.slug = ?
+    )`;
+    params.push(categoria);
   }
   if (busca) { sql += ' AND (p.nome LIKE ? OR p.descricao LIKE ?)'; params.push(`%${busca}%`, `%${busca}%`); }
   if (destaque === '1') sql += ' AND p.destaque = 1';

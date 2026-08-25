@@ -47,26 +47,20 @@ CREATE TABLE IF NOT EXISTS produto_cores (
   imagem_url TEXT
 );
 
--- Linhas: agrupamentos transversais de produto (ex.: "Infantil", "Linha Verão",
--- "Calçados"), cadastradas pelo superadmin. Um produto pode estar em nenhuma,
--- uma, várias ou todas as linhas ao mesmo tempo — por isso é tabela à parte
--- (N:N), diferente de categorias (uma só por produto).
-CREATE TABLE IF NOT EXISTS linhas (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  nome TEXT NOT NULL UNIQUE,
-  slug TEXT NOT NULL UNIQUE,
-  ordem INTEGER NOT NULL DEFAULT 0,
-  criado_em TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS produto_linhas (
+-- Categorias e "linhas" eram dois cadastros separados para a mesma ideia
+-- (agrupar produtos) — unificados num só. produtos.categoria_id continua
+-- guardando a categoria "principal" (é NOT NULL, então todo produto sempre
+-- tem uma), mas a partir daqui um produto pode participar de QUALQUER
+-- quantidade de categorias além dela — é isso que esta tabela representa.
+-- Ver db/migrate.js pela migração que juntou os dados das antigas "linhas".
+CREATE TABLE IF NOT EXISTS produto_categorias (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   produto_id INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
-  linha_id INTEGER NOT NULL REFERENCES linhas(id) ON DELETE CASCADE,
-  UNIQUE(produto_id, linha_id)
+  categoria_id INTEGER NOT NULL REFERENCES categorias(id) ON DELETE CASCADE,
+  UNIQUE(produto_id, categoria_id)
 );
-CREATE INDEX IF NOT EXISTS idx_produto_linhas_produto ON produto_linhas(produto_id);
-CREATE INDEX IF NOT EXISTS idx_produto_linhas_linha ON produto_linhas(linha_id);
+CREATE INDEX IF NOT EXISTS idx_produto_categorias_produto ON produto_categorias(produto_id);
+CREATE INDEX IF NOT EXISTS idx_produto_categorias_categoria ON produto_categorias(categoria_id);
 
 CREATE TABLE IF NOT EXISTS produto_estoque (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -297,9 +291,30 @@ CREATE TABLE IF NOT EXISTS interesses (
   UNIQUE(usuario_id, produto_id)
 );
 
+-- Catálogo de serviços de agendamento, cadastrado pelo admin. O cliente só
+-- escolhe entre estes (nada de texto livre) — ver routes/agendamentos.js.
+-- Cobrança 'fixo' = valor_fixo (preço fechado); 'tempo' = valor_unidade por
+-- unidade_tempo ('dias' | 'horas' | 'minutos'), ex.: R$ 20/hora.
+CREATE TABLE IF NOT EXISTS servicos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nome TEXT NOT NULL,
+  descricao TEXT,
+  tipo_cobranca TEXT NOT NULL DEFAULT 'fixo', -- 'fixo' | 'tempo'
+  valor_fixo REAL,
+  valor_unidade REAL,
+  unidade_tempo TEXT, -- 'dias' | 'horas' | 'minutos'
+  ativo INTEGER NOT NULL DEFAULT 1,
+  ordem INTEGER NOT NULL DEFAULT 0,
+  criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS agendamentos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   usuario_id INTEGER REFERENCES usuarios(id),
+  -- Serviço escolhido pelo cliente na lista cadastrada pelo admin. SET NULL
+  -- (em vez de bloquear) na exclusão do serviço: o agendamento já feito não
+  -- pode sumir, e servico_nome (abaixo) guarda o nome de qualquer forma.
+  servico_id INTEGER REFERENCES servicos(id) ON DELETE SET NULL,
   servico_nome TEXT NOT NULL,
   data_servico TEXT NOT NULL,
   horario TEXT NOT NULL,

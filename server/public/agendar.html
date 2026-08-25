@@ -17,7 +17,8 @@
   </div>
   <div class="form-card">
     <label>Serviço desejado</label>
-    <input id="a-servico" placeholder="Ex.: Ajuste de bombacha, confecção sob medida...">
+    <select id="a-servico"><option value="">Carregando...</option></select>
+    <p id="a-servico-cobranca" style="font-size:.85rem;color:var(--texto-suave);margin:-.4rem 0 1rem;"></p>
     <div class="linha-dupla">
       <div><label>Data desejada</label><input id="a-data" type="date"></div>
       <div><label>Horário</label><input id="a-horario" type="time"></div>
@@ -39,11 +40,46 @@
 <script src="/js/api.js"></script>
 <script src="/js/layout.js"></script>
 <script>
+let SERVICOS = [];
+
+// Texto da forma de cobrança, pro cliente saber o que esperar antes de enviar
+// a solicitação (o valor final continua sendo combinado na confirmação).
+function textoCobrancaServico(s) {
+  if (s.tipo_cobranca === 'tempo') {
+    const unidade = { dias: 'dia', horas: 'hora', minutos: 'minuto' }[s.unidade_tempo] || s.unidade_tempo;
+    return `${formatarMoeda(s.valor_unidade)} por ${unidade}`;
+  }
+  return `${formatarMoeda(s.valor_fixo)} (valor fechado)`;
+}
+
+async function carregarServicos() {
+  const select = document.getElementById('a-servico');
+  try {
+    SERVICOS = await Api.get('/api/servicos');
+    select.innerHTML = '<option value="">Selecione um serviço...</option>'
+      + SERVICOS.map(s => `<option value="${s.id}">${escapeHtml(s.nome)}</option>`).join('');
+  } catch (e) {
+    select.innerHTML = '<option value="">Não foi possível carregar os serviços</option>';
+  }
+  atualizarCobranca();
+}
+
+function atualizarCobranca() {
+  const servico = SERVICOS.find(s => String(s.id) === document.getElementById('a-servico').value);
+  const texto = document.getElementById('a-servico-cobranca');
+  texto.textContent = servico
+    ? `Cobrança: ${textoCobrancaServico(servico)}${servico.descricao ? ' — ' + servico.descricao : ''}`
+    : '';
+}
+
+document.getElementById('a-servico').addEventListener('change', atualizarCobranca);
+carregarServicos();
+
 document.getElementById('btn-agendar').addEventListener('click', async () => {
   const msg = document.getElementById('msg-agenda');
   try {
     const resp = await Api.post('/api/agendamentos', {
-      servico_nome: document.getElementById('a-servico').value,
+      servico_id: document.getElementById('a-servico').value,
       data_servico: document.getElementById('a-data').value,
       horario: document.getElementById('a-horario').value,
       local: document.getElementById('a-local').value,
